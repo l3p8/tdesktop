@@ -7,18 +7,32 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      # Step 1: Free up disk space & setup 12GB Swap to prevent linker crashes
-      - name: Maximize Build Space & Setup Swap
-        uses: easimon/maximize-build-space@v10
-        with:
-          root-reserve-mb: 8192
-          swap-size-mb: 12288
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-docker-images: 'false'
+      # Step 1: Aggressively reclaim 50+ GB of disk space
+      - name: Free Disk Space on Runner
+        run: |
+          echo "=== Disk space BEFORE cleanup ==="
+          df -h /
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/lib/jvm
+          sudo docker system prune -af --volumes
+          sudo apt-get clean
+          echo "=== Disk space AFTER cleanup ==="
+          df -h /
 
-      # Step 2: Checkout Telegram source code
+      # Step 2: Create an 8GB swapfile (prevents OOM crashes during C++ linking)
+      - name: Setup Swap
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      # Step 3: Checkout Telegram Desktop source code
       - name: Checkout Telegram Desktop
         uses: actions/checkout@v4
         with:
@@ -26,7 +40,7 @@ jobs:
           submodules: 'recursive'
           fetch-depth: 1
 
-      # Step 3: Patch out sponsored messages (ads)
+      # Step 4: Patch out sponsored messages (ads)
       - name: Patch Sponsored Messages
         run: |
           sed -i '/bool SponsoredMessages::canHaveFor/,/^[}]$/ {
@@ -36,7 +50,7 @@ jobs:
               /bool SponsoredMessages::canHaveFor/a \    return false;
           }' Telegram/SourceFiles/data/components/sponsored_messages.cpp
 
-      # Step 4: Compile using official prebuilt Docker container
+      # Step 5: Pull image & compile binary
       - name: Build Binary
         env:
           TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID }}
@@ -50,13 +64,13 @@ jobs:
             -D TDESKTOP_API_ID="$TDESKTOP_API_ID" \
             -D TDESKTOP_API_HASH="$TDESKTOP_API_HASH"
 
-      # Step 5: Strip symbols and package the binary
+      # Step 6: Strip symbols to reduce binary size (~150MB) and package
       - name: Package Binary
         run: |
           strip out/Release/Telegram
           tar -czf telegram-desktop-linux.tar.gz -C out/Release Telegram
 
-      # Step 6: Upload executable artifact for download
+      # Step 7: Upload artifact for download
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
