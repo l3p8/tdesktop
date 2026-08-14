@@ -1,13 +1,12 @@
 name: Build Telegram Desktop (No Ads)
 
 on:
-  workflow_dispatch: # Allows manual trigger from GitHub web UI
+  workflow_dispatch:
 
 jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      # Step 1: Free up disk space & create a swapfile (Standard runner disk is too small)
       - name: Maximize Build Space & Setup Swap
         uses: easimon/maximize-build-space@v10
         with:
@@ -18,7 +17,6 @@ jobs:
           remove-haskell: 'true'
           remove-docker-images: 'false'
 
-      # Step 2: Checkout official Telegram Desktop source
       - name: Checkout Telegram Desktop
         uses: actions/checkout@v4
         with:
@@ -26,7 +24,11 @@ jobs:
           submodules: 'recursive'
           fetch-depth: 1
 
-      # Step 3: Patch out sponsored messages (ads)
+      - name: Install Poetry
+        run: |
+          pipx install poetry
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
       - name: Patch Sponsored Messages
         run: |
           sed -i '/bool SponsoredMessages::canHaveFor/,/^[}]$/ {
@@ -36,12 +38,10 @@ jobs:
               /bool SponsoredMessages::canHaveFor/a \    return false;
           }' Telegram/SourceFiles/data/components/sponsored_messages.cpp
 
-      # Step 4: Prepare the CentOS Docker container
       - name: Prepare Build Environment
         run: |
           ./Telegram/build/prepare/linux.sh
 
-      # Step 5: Compile inside the container
       - name: Build Binary
         env:
           TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID }}
@@ -55,13 +55,11 @@ jobs:
             -D TDESKTOP_API_ID="$TDESKTOP_API_ID" \
             -D TDESKTOP_API_HASH="$TDESKTOP_API_HASH"
 
-      # Step 6: Strip debug symbols and compress
-      - name: Package Binary
+      - name: Strip Binary
         run: |
           strip out/Release/Telegram
           tar -czf telegram-desktop-linux.tar.gz -C out/Release Telegram
 
-      # Step 7: Upload executable for download
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
