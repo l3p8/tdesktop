@@ -7,7 +7,7 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      # Step 1: Free up disk space
+      # Step 1: Free up runner disk space
       - name: Free Disk Space on Runner
         run: |
           echo "=== Disk space BEFORE cleanup ==="
@@ -23,7 +23,7 @@ jobs:
           echo "=== Disk space AFTER cleanup ==="
           df -h /
 
-      # Step 2: Turn off existing swap & allocate a fresh 8GB Swap
+      # Step 2: Safely allocate an 8GB swapfile (prevents OOM linker crashes)
       - name: Setup Swap
         run: |
           sudo swapoff -a || true
@@ -34,9 +34,9 @@ jobs:
           sudo swapon /swapfile
           free -h
 
-      # Step 3: Checkout Telegram Desktop source code
+      # Step 3: Checkout source code using v5
       - name: Checkout Telegram Desktop
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: 'telegramdesktop/tdesktop'
           submodules: 'recursive'
@@ -52,11 +52,11 @@ jobs:
               /bool SponsoredMessages::canHaveFor/a \    return false;
           }' Telegram/SourceFiles/data/components/sponsored_messages.cpp
 
-      # Step 5: Pull image & compile binary
+      # Step 5: Pull official prebuilt Docker container & build
       - name: Build Binary
         env:
-          TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID }}
-          TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+          TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID || secrets.API_ID || secrets.APP_ID }}
+          TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH || secrets.API_HASH || secrets.APP_HASH }}
         run: |
           docker run --rm \
             -u $(id -u) \
@@ -66,15 +66,15 @@ jobs:
             -D TDESKTOP_API_ID="$TDESKTOP_API_ID" \
             -D TDESKTOP_API_HASH="$TDESKTOP_API_HASH"
 
-      # Step 6: Strip symbols and package binary
+      # Step 6: Strip symbols to optimize binary size and compress
       - name: Package Binary
         run: |
           strip out/Release/Telegram
           tar -czf telegram-desktop-linux.tar.gz -C out/Release Telegram
 
-      # Step 7: Upload artifact for download
+      # Step 7: Upload artifact using v5
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: telegram-desktop-noads
           path: telegram-desktop-linux.tar.gz
