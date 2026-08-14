@@ -7,7 +7,7 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      # Step 1: Aggressively reclaim 50+ GB of disk space
+      # Step 1: Free up disk space
       - name: Free Disk Space on Runner
         run: |
           echo "=== Disk space BEFORE cleanup ==="
@@ -23,9 +23,11 @@ jobs:
           echo "=== Disk space AFTER cleanup ==="
           df -h /
 
-      # Step 2: Create an 8GB swapfile (prevents OOM crashes during C++ linking)
+      # Step 2: Turn off existing swap & allocate a fresh 8GB Swap
       - name: Setup Swap
         run: |
+          sudo swapoff -a || true
+          sudo rm -f /swapfile
           sudo fallocate -l 8G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
@@ -64,7 +66,7 @@ jobs:
             -D TDESKTOP_API_ID="$TDESKTOP_API_ID" \
             -D TDESKTOP_API_HASH="$TDESKTOP_API_HASH"
 
-      # Step 6: Strip symbols to reduce binary size (~150MB) and package
+      # Step 6: Strip symbols and package binary
       - name: Package Binary
         run: |
           strip out/Release/Telegram
