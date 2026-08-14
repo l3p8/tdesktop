@@ -7,6 +7,7 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
+      # Step 1: Free up disk space & setup 12GB Swap to prevent linker crashes
       - name: Maximize Build Space & Setup Swap
         uses: easimon/maximize-build-space@v10
         with:
@@ -17,6 +18,7 @@ jobs:
           remove-haskell: 'true'
           remove-docker-images: 'false'
 
+      # Step 2: Checkout Telegram source code
       - name: Checkout Telegram Desktop
         uses: actions/checkout@v4
         with:
@@ -24,11 +26,7 @@ jobs:
           submodules: 'recursive'
           fetch-depth: 1
 
-      - name: Install Poetry
-        run: |
-          pipx install poetry
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
+      # Step 3: Patch out sponsored messages (ads)
       - name: Patch Sponsored Messages
         run: |
           sed -i '/bool SponsoredMessages::canHaveFor/,/^[}]$/ {
@@ -38,10 +36,7 @@ jobs:
               /bool SponsoredMessages::canHaveFor/a \    return false;
           }' Telegram/SourceFiles/data/components/sponsored_messages.cpp
 
-      - name: Prepare Build Environment
-        run: |
-          ./Telegram/build/prepare/linux.sh
-
+      # Step 4: Compile using official prebuilt Docker container
       - name: Build Binary
         env:
           TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID }}
@@ -50,16 +45,18 @@ jobs:
           docker run --rm \
             -u $(id -u) \
             -v "$PWD:/usr/src/tdesktop" \
-            tdesktop:centos_env \
+            ghcr.io/telegramdesktop/tdesktop/centos_env:latest \
             /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
             -D TDESKTOP_API_ID="$TDESKTOP_API_ID" \
             -D TDESKTOP_API_HASH="$TDESKTOP_API_HASH"
 
-      - name: Strip Binary
+      # Step 5: Strip symbols and package the binary
+      - name: Package Binary
         run: |
           strip out/Release/Telegram
           tar -czf telegram-desktop-linux.tar.gz -C out/Release Telegram
 
+      # Step 6: Upload executable artifact for download
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
