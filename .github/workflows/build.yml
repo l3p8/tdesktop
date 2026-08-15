@@ -1,103 +1,80 @@
-name: Build Telegram Android (New Standalone App)
+name: Build Telegram Desktop (No Ads)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-android:
+  build-linux:
     runs-on: ubuntu-latest
-
     steps:
-      # Step 1: Reclaim runner disk space
-      - name: Free Disk Space
+      # Step 1: Free up runner disk space
+      - name: Free Disk Space on Runner
         run: |
+          echo "=== Disk space BEFORE cleanup ==="
+          df -h /
           sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache
           sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/lib/jvm
+          sudo docker system prune -af --volumes
+          sudo apt-get clean
+          echo "=== Disk space AFTER cleanup ==="
+          df -h /
 
-      # Step 2: Set up Java 17
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: 'temurin'
-          java-version: '17'
+      # Step 2: Safely allocate an 8GB swapfile (prevents OOM linker crashes)
+      - name: Setup Swap
+        run: |
+          sudo swapoff -a || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
 
-      # Step 3: Set up Android NDK (r27c)
-      - name: Set up NDK
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r27c
-
-      # Step 4: Checkout source using v5
-      - name: Checkout Telegram Android
+      # Step 3: Checkout source code using v5
+      - name: Checkout Telegram Desktop
         uses: actions/checkout@v5
         with:
-          repository: 'DrKLO/Telegram'
+          repository: 'telegramdesktop/tdesktop'
           submodules: 'recursive'
           fetch-depth: 1
 
-      # Step 5: Change Package ID & App Name to create an independent app
-      - name: Customize App Identity
+      # Step 4: Patch out sponsored messages (ads)
+      - name: Patch Sponsored Messages
         run: |
-          # 1. Change the Application ID / Package Name
-          sed -i 's/APP_PACKAGE=org\.telegram\.messenger/APP_PACKAGE=org.telegram.messenger.custom/g' gradle.properties
-          
-          # 2. Change the App display name
-          sed -i 's/<string name="AppName">Telegram<\/string>/<string name="AppName">Telegram NoAds<\/string>/g' TMessagesProj/src/main/res/values/strings.xml
+          sed -i '/bool SponsoredMessages::canHaveFor/,/^[}]$/ {
+              /bool SponsoredMessages::canHaveFor/! {
+                  /^[}]$/!d
+              }
+              /bool SponsoredMessages::canHaveFor/a \    return false;
+          }' Telegram/SourceFiles/data/components/sponsored_messages.cpp
 
-      # Step 6: Delete old keystore and generate a fresh unique signing key
-      - name: Generate Custom Signing Key
-        run: |
-          mkdir -p TMessagesProj/config
-          # Delete the old template keystore so keytool creates a clean new one
-          rm -f TMessagesProj/config/release.keystore
-
-          keytool -genkeypair -v \
-            -keystore TMessagesProj/config/release.keystore \
-            -alias customkey \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -storepass mysecretpass123 \
-            -keypass mysecretpass123 \
-            -dname "CN=TelegramCustom, OU=Client, O=AdFree, L=Munich, C=DE"
-
-          # Update gradle.properties with the new keystore passwords
-          sed -i 's/RELEASE_KEY_PASSWORD=.*/RELEASE_KEY_PASSWORD=mysecretpass123/g' gradle.properties
-          sed -i 's/RELEASE_KEY_ALIAS=.*/RELEASE_KEY_ALIAS=customkey/g' gradle.properties
-          sed -i 's/RELEASE_STORE_PASSWORD=.*/RELEASE_STORE_PASSWORD=mysecretpass123/g' gradle.properties
-
-      # Step 7: Safely configure Telegram API credentials
-      - name: Configure API Credentials
+      # Step 5: Pull official prebuilt Docker container & build
+      - name: Build Binary
         env:
-          APP_ID: ${{ secrets.TDESKTOP_API_ID || secrets.API_ID || secrets.APP_ID }}
-          APP_HASH: ${{ secrets.TDESKTOP_API_HASH || secrets.API_HASH || secrets.APP_HASH }}
+          TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID || secrets.API_ID || secrets.APP_ID }}
+          TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH || secrets.API_HASH || secrets.APP_HASH }}
         run: |
-          if [ -n "$APP_ID" ] && [ -n "$APP_HASH" ]; then
-            echo "Applying custom API credentials..."
-            sed -i "s/public static int APP_ID = .*/public static int APP_ID = $APP_ID;/" TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java
-            sed -i "s/public static String APP_HASH = .*/public static String APP_HASH = \"$APP_HASH\";/" TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java
-          else
-            echo "No custom API secrets found; keeping default build keys."
-          fi
+          docker run --rm \
+            -u $(id -u) \
+            -v "$PWD:/usr/src/tdesktop" \
+            ghcr.io/telegramdesktop/tdesktop/centos_env:latest \
+            /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
+            -D TDESKTOP_API_ID="$TDESKTOP_API_ID" \
+            -D TDESKTOP_API_HASH="$TDESKTOP_API_HASH"
 
-      # Step 8: Patch UserConfig.java to remove sponsored messages (ads)
-      - name: Patch Ad-Free Status
+      # Step 6: Strip symbols to optimize binary size and compress
+      - name: Package Binary
         run: |
-          sed -i 's/return user\.premium;/return true;/g' TMessagesProj/src/main/java/org/telegram/messenger/UserConfig.java
+          strip out/Release/Telegram
+          tar -czf telegram-desktop-linux.tar.gz -C out/Release Telegram
 
-      # Step 9: Build Standalone Release APK
-      - name: Build APK
-        run: |
-          chmod +x gradlew
-          ./gradlew :TMessagesProj_AppStandalone:assembleAfatRelease -x lint -x test --no-daemon --parallel --stacktrace
-
-      # Step 10: Upload the standalone APK artifact using v5
-      - name: Upload APK Artifact
+      # Step 7: Upload artifact using v5
+      - name: Upload Artifact
         uses: actions/upload-artifact@v5
         with:
-          name: Telegram-Android-Standalone-NoAds
-          path: |
-            TMessagesProj_AppStandalone/build/outputs/apk/**/*.apk
-            TMessagesProj/build/outputs/apk/**/*.apk
+          name: telegram-desktop-noads
+          path: telegram-desktop-linux.tar.gz
