@@ -1,4 +1,4 @@
-name: Build Telegram Desktop (No Ads)
+name: Build Telegram Desktop (No Ads + Multi-Account)
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      # Step 1: Free up runner disk space
+      # Step 1: Reclaim 50+ GB of runner disk space
       - name: Free Disk Space on Runner
         run: |
           echo "=== Disk space BEFORE cleanup ==="
@@ -18,13 +18,13 @@ jobs:
           sudo rm -rf /opt/hostedtoolcache
           sudo rm -rf /usr/local/share/boost
           sudo rm -rf /usr/lib/jvm
-          sudo docker system prune -af --volumes
+          sudo docker system prune -af --volumes || true
           sudo apt-get clean
           echo "=== Disk space AFTER cleanup ==="
           df -h /
 
-      # Step 2: Safely allocate an 8GB swapfile (prevents OOM linker crashes)
-      - name: Setup Swap
+      # Step 2: Safely allocate an 8GB swapfile (prevents Out-Of-Memory linker crashes)
+      - name: Setup Swap Space
         run: |
           sudo swapoff -a || true
           sudo rm -f /swapfile
@@ -34,16 +34,16 @@ jobs:
           sudo swapon /swapfile
           free -h
 
-      # Step 3: Checkout source code using v5
+      # Step 3: Checkout official Telegram Desktop source
       - name: Checkout Telegram Desktop
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           repository: 'telegramdesktop/tdesktop'
           submodules: 'recursive'
           fetch-depth: 1
 
-      # Step 4: Patch out sponsored messages (ads)
-      - name: Patch Sponsored Messages
+      # Step 4: Patch sponsored messages (ads) in C++ source
+      - name: Patch Sponsored Messages (Remove Ads)
         run: |
           sed -i '/bool SponsoredMessages::canHaveFor/,/^[}]$/ {
               /bool SponsoredMessages::canHaveFor/! {
@@ -52,8 +52,19 @@ jobs:
               /bool SponsoredMessages::canHaveFor/a \    return false;
           }' Telegram/SourceFiles/data/components/sponsored_messages.cpp
 
-      # Step 5: Pull official prebuilt Docker container & build
-      - name: Build Binary
+      # Step 5: Increase Max Accounts Limit (Set to 100 slots)
+      - name: Patch Max Accounts Limit
+        run: |
+          # Replace kMaxAccounts and kPremiumMaxAccounts (if present) with 100
+          sed -i -E 's/(kMaxAccounts = )[0-9]+/\1100/g' Telegram/SourceFiles/main/main_domain.h
+          sed -i -E 's/(kPremiumMaxAccounts = )[0-9]+/\1100/g' Telegram/SourceFiles/main/main_domain.h || true
+
+          # Verify patch was applied
+          echo "=== Patched Account Limit ==="
+          grep -E "kMaxAccounts|kPremiumMaxAccounts" Telegram/SourceFiles/main/main_domain.h
+
+      # Step 6: Pull official prebuilt Docker toolchain & compile
+      - name: Build Binary via Prebuilt Docker Container
         env:
           TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID || secrets.API_ID || secrets.APP_ID }}
           TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH || secrets.API_HASH || secrets.APP_HASH }}
@@ -66,15 +77,15 @@ jobs:
             -D TDESKTOP_API_ID="$TDESKTOP_API_ID" \
             -D TDESKTOP_API_HASH="$TDESKTOP_API_HASH"
 
-      # Step 6: Strip symbols to optimize binary size and compress
+      # Step 7: Strip debug symbols and compress into tar.gz
       - name: Package Binary
         run: |
           strip out/Release/Telegram
           tar -czf telegram-desktop-linux.tar.gz -C out/Release Telegram
 
-      # Step 7: Upload artifact using v5
+      # Step 8: Upload executable artifact for download
       - name: Upload Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         with:
-          name: telegram-desktop-noads
+          name: telegram-desktop-custom
           path: telegram-desktop-linux.tar.gz
