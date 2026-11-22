@@ -78,6 +78,7 @@ ComposeIcons {
 	menuMute: icon;
 	menuSchedule: icon;
 	menuWhenOnline: icon;
+	menuReply: icon;
 	menuSpoiler: icon;
 	menuBelow: icon;
 	menuAbove: icon;
@@ -122,6 +123,7 @@ EmojiPan {
 	trendingSubheaderFg: color;
 	trendingUnreadFg: color;
 	overBg: color;
+	markedBg: color;
 	pathBg: color;
 	pathFg: color;
 	textFg: color;
@@ -134,6 +136,7 @@ EmojiPan {
 	expandedSeparator: MenuSeparator;
 	tabs: SettingsSlider;
 	search: TabbedSearch;
+	scroll: ScrollArea;
 	searchMargin: margins;
 	searchPacksTop: pixels;
 	searchPackWidth: pixels;
@@ -156,6 +159,7 @@ EmojiPan {
 	photoButtonIcon: icon;
 	audioButtonIcon: icon;
 	linkButtonIcon: icon;
+	locationButtonIcon: icon;
 	colorAll: IconButton;
 	colorAllLabel: FlatLabel;
 	removeSet: IconButton;
@@ -227,6 +231,7 @@ ComposeFiles {
 	buttonFile: IconButton;
 	buttonFileEdit: icon;
 	buttonFileDelete: icon;
+	selectCheck: RoundCheckbox;
 	iconBg: color;
 	iconPlay: icon;
 	iconImage: icon;
@@ -638,7 +643,15 @@ stickersPhotoButtonHeight: 36px;
 stickersPhotoButtonRadius: 8px;
 stickersPhotoButtonPadding: margins(6px, 0px, 12px, 0px);
 stickersPhotoButtonIconSkip: 4px;
+stickersPhotoButtonEmojiSize: 24px;
 stickersPhotoButtonFont: font(14px bold);
+stickersWidgetReactionIcon: 20px;
+stickersReactionCloud: 32px;
+stickersReactionCloudShift: point(-2px, -1px);
+stickersReactionBubble: 10px;
+stickersReactionBubbleShift: point(11px, 9px);
+stickersReactionDot: 4px;
+stickersReactionDotShift: point(17px, 15px);
 stickersPhotoButtonSkip: 10px;
 mediaPreviewPhotoSkip: 48px;
 
@@ -705,6 +718,9 @@ sendBoxAlbumGroupButtonFile: IconButton(editMediaButton) {
 }
 sendBoxAlbumGroupEditButtonIconFile: editMediaButtonIconFile;
 sendBoxAlbumGroupDeleteButtonIconFile: icon {{ "send_media/send_media_cross", menuIconFg }};
+sendBoxFileSelectCheck: RoundCheckbox(defaultPeerListCheck) {
+	bgActive: boxTextFgGood;
+}
 
 sendBoxAlbumButtonMediaMore: icon {{ "send_media/send_media_more", roundedFg }};
 sendBoxAlbumGroupButtonMediaMore: icon {{ "send_media/send_media_more", roundedFg, point(4px, 1px) }};
@@ -749,6 +765,7 @@ defaultComposeIcons: ComposeIcons {
 	menuMute: menuIconMute;
 	menuSchedule: menuIconSchedule;
 	menuWhenOnline: menuIconWhenOnline;
+	menuReply: menuIconReply;
 	menuSpoiler: menuIconSpoiler;
 	menuBelow: menuIconBelow;
 	menuAbove: menuIconAbove;
@@ -778,6 +795,14 @@ defaultEmojiPanAbout: FlatLabel(defaultFlatLabel) {
 		font: font(11px);
 	}
 }
+emojiScroll: ScrollArea(defaultSolidScroll) {
+	deltat: 3px;
+	deltab: 3px;
+	round: -1px;
+	width: 7px;
+	deltax: 2px;
+	hiding: 0;
+}
 defaultEmojiPan: EmojiPan {
 	margin: margins(7px, 0px, 7px, 0px);
 	padding: margins(7px, 0px, 4px, 7px);
@@ -799,6 +824,7 @@ defaultEmojiPan: EmojiPan {
 	trendingSubheaderFg: stickersTrendingSubheaderFg;
 	trendingUnreadFg: stickersFeaturedUnreadBg;
 	overBg: emojiPanHover;
+	markedBg: stickersEmojiPickerSelectedBg;
 	pathBg: windowBgRipple;
 	pathFg: windowBgOver;
 	textFg: windowFg;
@@ -814,6 +840,7 @@ defaultEmojiPan: EmojiPan {
 	}
 	tabs: emojiTabs;
 	search: defaultTabbedSearch;
+	scroll: emojiScroll;
 	searchMargin: margins(1px, 11px, 2px, 5px);
 	searchPacksTop: 0px;
 	searchPackWidth: 70px;
@@ -836,6 +863,7 @@ defaultEmojiPan: EmojiPan {
 	photoButtonIcon: icon {{ "photo_editor/camera-24x24", windowFg }};
 	audioButtonIcon: icon {{ "photo_editor/widget_music", windowFg }};
 	linkButtonIcon: icon {{ "limits/links", windowFg }};
+	locationButtonIcon: icon {{ "chat/filled_location", windowFg }};
 	colorAll: emojiPanColorAll;
 	colorAllLabel: emojiPanColorAllLabel;
 	removeSet: stickerPanRemoveSet;
@@ -951,14 +979,6 @@ userpicBuilderEmojiPan: EmojiPan(statusEmojiPan) {
 reactPanelEmojiPan: EmojiPan(userpicBuilderEmojiPan) {
 	searchMargin: margins(1px, 10px, 2px, 6px);
 }
-emojiScroll: ScrollArea(defaultSolidScroll) {
-	deltat: 3px;
-	deltab: 3px;
-	round: -1px;
-	width: 7px;
-	deltax: 2px;
-	hiding: 0;
-}
 reactPanelScroll: ScrollArea(emojiScroll) {
 	deltab: 7px;
 }
@@ -971,6 +991,11 @@ reactPanelScrollRounded: ScrollArea(emojiScroll) {
 selfForwardsTaggerStripSkip: 11px;
 
 toastLottieIconSize: size(20px, 20px);
+textCopiedToastLoading: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
+	color: toastFg;
+	thickness: 2px;
+	size: toastLottieIconSize;
+}
 selfForwardsTaggerIconPadding: margins(14px, 2px, 8px, 2px);
 selfForwardsTaggerToast: Toast(defaultToast) {
 	minWidth: 160px;
@@ -1340,6 +1365,7 @@ historyMessagesTTL: IconButtonWithText {
 	textAlign: align(left);
 
 	font: font(10px semibold);
+	minFontSize: 7px;
 }
 historyReplaceMedia: IconButton(historyAttach) {
 	icon: icon {{ "chat/input_replace", windowBgActive }};
@@ -1588,6 +1614,7 @@ defaultComposeFiles: ComposeFiles {
 	buttonFile: sendBoxAlbumGroupButtonFile;
 	buttonFileEdit: sendBoxAlbumGroupEditButtonIconFile;
 	buttonFileDelete: sendBoxAlbumGroupDeleteButtonIconFile;
+	selectCheck: sendBoxFileSelectCheck;
 	iconBg: msgFileInBg;
 	iconPlay: icon {{ "history_file_play", historyFileInIconFg }};
 	iconImage: icon {{ "history_file_image", historyFileInIconFg }};
@@ -1708,6 +1735,10 @@ dragDropColor: windowActiveTextFg;
 dragMargin: margins(0px, 10px, 0px, 10px);
 dragPadding: margins(20px, 10px, 20px, 10px);
 dragHeight: 72px;
+dragIconSkip: 4px;
+dragIconMedia: icon {{ "local_storage/photos-64x64", dragColor }};
+dragIconFiles: icon {{ "local_storage/documents-64x64", dragColor }};
+dragIconArchive: icon {{ "chat/large_zip-64x64", dragColor }};
 
 ttlMediaImportantTooltipLabel: FlatLabel(defaultImportantTooltipLabel) {
 	style: TextStyle(defaultTextStyle) {

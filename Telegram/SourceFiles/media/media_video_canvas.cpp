@@ -7,6 +7,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/media_video_canvas.h"
 
+#include "base/basic_types.h"
+
+#include <QtGui/QPainter>
+
 namespace Media::Encode {
 namespace {
 
@@ -53,6 +57,21 @@ CanvasBackground DominantCanvasBackground(const QImage &image) {
 	return { AdaptColor(top), AdaptColor(bottom) };
 }
 
+void PaintCanvasBackground(
+		QPainter &p,
+		const QRect &rect,
+		const CanvasBackground &background) {
+	if (!background.valid()) {
+		return;
+	}
+	auto gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft());
+	gradient.setStops({
+		{ 0., background.top },
+		{ 1., background.bottom },
+	});
+	p.fillRect(rect, gradient);
+}
+
 QRect CanvasPlacement(QSize image, QSize canvas) {
 	if (image.isEmpty() || canvas.isEmpty()) {
 		return QRect(QPoint(), canvas);
@@ -69,21 +88,6 @@ QRect CanvasPlacement(QSize image, QSize canvas) {
 			(canvas.width() - size.width()) / 2,
 			(canvas.height() - size.height()) / 2),
 		size);
-}
-
-void PaintCanvasBackground(
-		QPainter &p,
-		const QRect &rect,
-		const CanvasBackground &background) {
-	if (!background.valid()) {
-		return;
-	}
-	auto gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft());
-	gradient.setStops({
-		{ 0., background.top },
-		{ 1., background.bottom },
-	});
-	p.fillRect(rect, gradient);
 }
 
 QRect RoundedCanvasRect(const QRectF &rect) {

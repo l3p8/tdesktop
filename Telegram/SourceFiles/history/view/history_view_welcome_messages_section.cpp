@@ -211,6 +211,10 @@ WelcomeMessagesWidget::WelcomeMessagesWidget(
 }
 
 WelcomeMessagesWidget::~WelcomeMessagesWidget() {
+	if (const auto box = _sendFilesBox.data()) {
+		box->closeBox();
+	}
+	_composeControls->closeSendAsFileBox();
 	if (_notice) {
 		_notice->destroy();
 	}
@@ -331,12 +335,14 @@ void WelcomeMessagesWidget::setupComposeControls() {
 		_composeControls->scrollKeyEvents(),
 		_inner->scrollKeyEvents()
 	) | rpl::on_next([=](not_null<QKeyEvent*> e) {
+		Tgw::ListScroll::Input(_inner.data());
 		_scroll->keyPressEvent(e);
 	}, lifetime());
 
 	_composeControls->editLastMessageRequests(
 	) | rpl::on_next([=](not_null<QKeyEvent*> e) {
 		if (!_inner->lastMessageEditRequestNotify()) {
+			Tgw::ListScroll::Input(_inner.data());
 			_scroll->keyPressEvent(e);
 		}
 	}, lifetime());
@@ -442,6 +448,7 @@ bool WelcomeMessagesWidget::confirmSendingFiles(
 		.cancelled = _composeControls->restoreTextCallback(
 			insertTextOnCancel),
 	});
+	_sendFilesBox = box.data();
 	box->takeTextWithTagsRequests(
 	) | rpl::on_next([=](TextWithTags &&text) {
 		_composeControls->setText(std::move(text));

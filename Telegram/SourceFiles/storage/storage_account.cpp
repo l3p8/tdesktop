@@ -1805,10 +1805,6 @@ bool Account::hasDraftCursors(PeerId peer) {
 	return _draftCursorsMap.contains(peer);
 }
 
-bool Account::hasDraft(PeerId peer) {
-	return _draftsMap.contains(peer);
-}
-
 void Account::writeFileLocation(MediaKey location, const Core::FileLocation &local) {
 	if (local.fname.isEmpty()) {
 		return;
@@ -4035,6 +4031,19 @@ void Account::writePrefImpl<QString>(
 		std::string_view key,
 		QString value) {
 	writePrefGeneric(key, value.toUtf8());
+}
+
+template <>
+std::optional<QByteArray> Account::readPrefImpl<QByteArray>(
+		std::string_view key) {
+	return readPrefGeneric(key);
+}
+
+template <>
+void Account::writePrefImpl<QByteArray>(
+		std::string_view key,
+		QByteArray value) {
+	writePrefGeneric(key, std::move(value));
 }
 
 } // namespace Storage

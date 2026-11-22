@@ -6,6 +6,7 @@ scriptPath = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(scriptPath + '/..')
 import qt_version
 import build_mac
+import msvc
 
 def finish(code):
     global executePath
@@ -59,7 +60,6 @@ thirdPartyDir = os.path.realpath(os.path.join(rootDir, 'ThirdParty'))
 usedPrefix = os.path.realpath(os.path.join(libsDir, 'local'))
 
 optionsList = [
-    'qt6',
     'skip-release',
     'build-stackwalk',
     'qt-asserts',
@@ -235,6 +235,8 @@ def computeCacheKey(stage):
         stage['version'],
         stage['commands']
     ]
+    if winarm and stage['name'] == 'ffmpeg':
+        objects.append('MSVC=' + str(stage['msvc_version']))
     for pattern in stage['dependencies']:
         pathlist = glob.glob(os.path.join(libsDir, pattern))
         items = [pattern]
@@ -372,7 +374,9 @@ def printCommands(commands):
     print(commands, end='')
     print('--------------------------------------------------------------------------------')
 
-def run(commands):
+def run(commands, env = None):
+    if env is None:
+        env = modifiedEnv
     printCommands(commands)
     if win:
         if os.path.exists("command.bat"):
@@ -380,14 +384,14 @@ def run(commands):
         with open("command.bat", 'w') as file:
             file.write('@echo OFF\r\nset "NoDefaultCurrentDirectoryInExePath="\r\n' + winFailOnEach(commands))
         batPath = os.path.abspath("command.bat")
-        result = subprocess.run(batPath, shell=True, env=modifiedEnv).returncode == 0
+        result = subprocess.run(batPath, shell=True, env=env).returncode == 0
         if result and os.path.exists("command.bat"):
             os.remove("command.bat")
         return result
     elif re.search(r'\%', commands):
         error('Bad command: ' + commands)
     else:
-        return subprocess.run("set -e\n" + commands, shell=True, env=modifiedEnv).returncode == 0
+        return subprocess.run("set -e\n" + commands, shell=True, env=env).returncode == 0
 
 # Thanks https://stackoverflow.com/a/510364
 class _Getch:
@@ -448,6 +452,12 @@ def runStages():
     for stage in stages:
         if len(onlyStages) > 0 and not stage['name'] in onlyStages:
             continue
+        stageEnvironment = modifiedEnv
+        if winarm and stage['name'] == 'ffmpeg':
+            try:
+                stageEnvironment, stage['msvc_version'] = msvc.ffmpeg_environment(modifiedEnv)
+            except RuntimeError as exception:
+                error(str(exception))
         index = index + 1
         version = ('#' + str(stage['version'])) if (stage['version'] != '0') else ''
         prefix = '[' + str(index) + '/' + str(count) + '](' + stage['location'] + '/' + stage['name'] + version + ')'
@@ -493,7 +503,7 @@ def runStages():
         clearCacheKey(stage)
         print('BUILDING:')
         os.chdir(stage['directory'])
-        if not run(commands):
+        if not run(commands, stageEnvironment):
             print(prefix + ': FAILED')
             finish(1)
         writeCacheKey(stage)
@@ -520,12 +530,12 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout aec474953ff7ee9b6e4cd9b8658288ea86d124f3
+    git checkout 69f23a834024d6064da209076151393582b3c966
 mac:
     sed -i '' "s/10.13/$MACOSX_DEPLOYMENT_TARGET/g" macos_meson_*.txt
     git clone https://github.com/desktop-app/qt6_highsierra_patches.git qt6_highsierra
     cd qt6_highsierra
-    git checkout 7387476bb3b7200d3b044015696cb3c28f78593c
+    git checkout df21d71753b075f205e595effb7575b3435012c6
 """)
 
 stage('msys64', """
@@ -1022,8 +1032,13 @@ mac:
 """)
 
 stage('libjxl', """
-    git clone -b v0.12.0 --recursive --shallow-submodules https://github.com/libjxl/libjxl.git
+    git clone -b v0.12.0 --recursive https://github.com/libjxl/libjxl.git
     cd libjxl
+    cd third_party
+    cd brotli
+    git checkout v1.2.1
+    cd ..
+    cd ..
 """ + setVar("cmake_defines", """
     -DBUILD_SHARED_LIBS=OFF
     -DBUILD_TESTING=OFF
@@ -1170,8 +1185,16 @@ stage('regex', """
 """)
 
 stage('ffmpeg', """
-    git clone -b n8.1.3 https://github.com/FFmpeg/FFmpeg.git ffmpeg
+    git clone -b release/8.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg
     cd ffmpeg
+    git checkout e22a4510c982b048945052bd6a503475014b7ba0
+depends:patches/ffmpeg/*.patch
+win:
+    for %%i in (..\\patches\\ffmpeg\\*.patch) do (
+        git apply "%%i" || exit /b 1
+    )
+mac:
+    find ../patches/ffmpeg -type f -name '*.patch' -print0 | sort -z | xargs -0 git apply
 win:
 depends:patches/ffmpeg.patch
     git apply ../patches/ffmpeg.patch
@@ -1418,7 +1441,7 @@ stage('openal-soft', """
     git clone https://github.com/telegramdesktop/openal-soft.git
     cd openal-soft
 win:
-    git checkout 291c0fdbbd
+    git checkout 00cb9b649c
     cmake -B build . ^
         -D LIBTYPE:STRING=STATIC ^
         -D FORCE_STATIC_VCRT=ON ^
@@ -1511,7 +1534,8 @@ release:
     ninja -C out/Release%FolderPostfix% common crash_generation_client exception_handler
     cd tools\\windows\\dump_syms
     gyp dump_syms.gyp --format=msvs
-    msbuild -m dump_syms.vcxproj /property:Configuration=Release /property:Platform="x64" %ToolsetProp%
+    # dump_syms requires ATL; not used by Telegram.
+    if not "%SKIP_DUMPSYMS%"=="1" msbuild -m dump_syms.vcxproj /property:Configuration=Release /property:Platform="x64" %ToolsetProp%
 win:
     deactivate
 mac:
@@ -1581,13 +1605,21 @@ release:
     lipo -create Release.arm64/libcrashpad_client.a Release.x86_64/libcrashpad_client.a -output Release/libcrashpad_client.a
 """)
 
-if qt < '6':
-    if win:
-        stage('tg_angle', """
-win:
+if win:
+    # Windows 7 and 8 support for qtbase, and the ANGLE backend Qt 6 dropped.
+    stage('qt6_windows7', """
+win32_win64:
+    git clone https://github.com/desktop-app/qt6_windows7_patches.git qt6_windows7
+    cd qt6_windows7
+    git checkout fd8d5035b25bce04b849b6f87818ad3a2ba66c7d
+""")
+
+if win:
+    stage('tg_angle', """
+win32_win64:
     git clone https://github.com/desktop-app/tg_angle.git
     cd tg_angle
-    git checkout f62ce7f6efe014cf1f7d95830c505fd2ac1c49e0
+    git checkout 9fd174a91e6155d1006c5f427366b23006f5d899
     cmake -B out ^
         -DTG_ANGLE_SPECIAL_TARGET=%SPECIAL_TARGET% ^
         -DTG_ANGLE_ZLIB_INCLUDE_PATH=%LIBS_DIR%/zlib
@@ -1596,85 +1628,28 @@ release:
     cmake --build out --config Release
 """)
 
-    stage('qt_' + qt, """
-    git clone -b v$QT-lts-lgpl https://github.com/qt/qt5.git qt_$QT
-    cd qt_$QT
-    git submodule update --init --recursive --progress qtbase qtimageformats qtsvg
-depends:patches/qtbase_""" + qt + """/*.patch
-win:
-    cd qtbase
-    setlocal enabledelayedexpansion
-    for /r %%i in (..\\..\\patches\\qtbase_%QT%\\*) do (
-        git apply %%i -v
-        if errorlevel 1 (
-            echo ERROR: Applying patch %%~nxi failed!
-            exit /b 1
-        )
-    )
-    cd ..
-
-    SET CONFIGURATIONS=-debug
-release:
-    SET CONFIGURATIONS=-debug-and-release
-win:
-    """ + removeDir('"%LIBS_DIR%\\Qt-' + qt + '"') + """
-    SET ANGLE_DIR=%LIBS_DIR%\\tg_angle
-    SET ANGLE_LIBS_DIR=%ANGLE_DIR%\\out
-    SET MOZJPEG_DIR=%LIBS_DIR%\\mozjpeg
-    SET OPENSSL_DIR=%LIBS_DIR%\\openssl3
-    SET OPENSSL_LIBS_DIR=%OPENSSL_DIR%\\out
-    SET ZLIB_LIBS_DIR=%LIBS_DIR%\\zlib
-    SET WEBP_DIR=%LIBS_DIR%\\libwebp
-    configure -prefix "%LIBS_DIR%\\Qt-%QT%" ^
-        %CONFIGURATIONS% ^
-        -force-debug-info ^
-        -opensource ^
-        -confirm-license ^
-        -static ^
-        -static-runtime ^
-        -opengl es2 -no-angle ^
-        -I "%ANGLE_DIR%\\include" ^
-        -D "KHRONOS_STATIC=" ^
-        -D "DESKTOP_APP_QT_STATIC_ANGLE=" ^
-        QMAKE_LIBS_OPENGL_ES2_DEBUG="%ANGLE_LIBS_DIR%\\Debug\\tg_angle.lib %ZLIB_LIBS_DIR%\\Debug\\libzsd.lib d3d9.lib dxgi.lib dxguid.lib" ^
-        QMAKE_LIBS_OPENGL_ES2_RELEASE="%ANGLE_LIBS_DIR%\\Release\\tg_angle.lib %ZLIB_LIBS_DIR%\\Release\\libzs.lib d3d9.lib dxgi.lib dxguid.lib" ^
-        -egl ^
-        QMAKE_LIBS_EGL_DEBUG="%ANGLE_LIBS_DIR%\\Debug\\tg_angle.lib %ZLIB_LIBS_DIR%\\Debug\\libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" ^
-        QMAKE_LIBS_EGL_RELEASE="%ANGLE_LIBS_DIR%\\Release\\tg_angle.lib %ZLIB_LIBS_DIR%\\Release\\libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" ^
-        -openssl-linked ^
-        -I "%OPENSSL_DIR%\\include" ^
-        OPENSSL_LIBS_DEBUG="%OPENSSL_LIBS_DIR%.dbg\\libssl.lib %OPENSSL_LIBS_DIR%.dbg\\libcrypto.lib Ws2_32.lib Gdi32.lib Advapi32.lib Crypt32.lib User32.lib" ^
-        OPENSSL_LIBS_RELEASE="%OPENSSL_LIBS_DIR%\\libssl.lib %OPENSSL_LIBS_DIR%\\libcrypto.lib Ws2_32.lib Gdi32.lib Advapi32.lib Crypt32.lib User32.lib" ^
-        -I "%MOZJPEG_DIR%" ^
-        LIBJPEG_LIBS_DEBUG="%MOZJPEG_DIR%\\Debug\\jpeg-static.lib" ^
-        LIBJPEG_LIBS_RELEASE="%MOZJPEG_DIR%\\Release\\jpeg-static.lib" ^
-        -system-webp ^
-        -I "%WEBP_DIR%\\src" ^
-        -L "%WEBP_DIR%\\out\\release-static\\$X8664\\lib" ^
-        -mp ^
-        -no-feature-netlistmgr ^
-        -nomake examples ^
-        -nomake tests ^
-        -platform win32-msvc
-
-    rem jom -jN occasionally fails to create the shared mkspecs\\modules-inst
-    rem directory due to a race in qmake's mkpath under parallel builds; the
-    rem build is incremental, so simply retrying picks up where it stopped.
-    jom -j%NUMBER_OF_PROCESSORS% || jom -j%NUMBER_OF_PROCESSORS%
-    jom -j%NUMBER_OF_PROCESSORS% install
-""")
-else: # qt > '6'
-    branch = 'v$QT' + ('-lts-lgpl' if qt.startswith('6.2.') else '')
-    stage('qt_' + qt, """
+qtAngleCmake = os.path.realpath(os.path.join(
+    scriptPath, '../../../cmake/external/angle/qt.cmake')).replace('\\', '/')
+# checkouts share Libraries, so the cache key gets the content, not the path
+modifiedEnv['QT_ANGLE_CMAKE'] = qtAngleCmake
+branch = 'v$QT' + ('-lts-lgpl' if qt.startswith('6.2.') else '')
+stage('qt_' + qt, """
     git clone -b """ + branch + """ https://github.com/qt/qt5.git qt_$QT
     cd qt_$QT
     git submodule update --init --recursive --progress qtbase qtimageformats qtshadertools qtsvg
 depends:patches/qtbase_""" + qt + """/*.patch
+depends:patches/qtsvg_""" + qt + """/*.patch
+win32_win64:
+depends:qt6_windows7/*.patch
+mac:
+depends:patches/qt6_highsierra/*.patch
+version:""" + computeFileHash(qtAngleCmake) + """
 mac:
     if [ -d "../patches/qt6_highsierra" ]; then
         find "$PWD/../patches/qt6_highsierra" -maxdepth 1 -name "*.patch" -print0 | sort -z | xargs -0 git -C qtbase apply -v
     fi
     find $PWD/../patches/qtbase_$QT -type f -print0 | sort -z | xargs -0 git -C qtbase apply -v
+    find $PWD/../patches/qtsvg_$QT -type f -print0 | sort -z | xargs -0 git -C qtsvg apply -v
     sed -i.bak 's/tqtc-//' {qtimageformats,qtsvg}/dependencies.yaml
 
     CONFIGURATIONS=-debug
@@ -1713,8 +1688,25 @@ mac:
 win:
     cd qtbase
     setlocal enabledelayedexpansion
+win32_win64:
+    for %%i in (..\\..\\qt6_windows7\\*.patch) do (
+        git apply %%i --ignore-whitespace -v
+        if errorlevel 1 (
+            echo ERROR: Applying patch %%~nxi failed!
+            exit /b 1
+        )
+    )
+win:
     for /r %%i in (..\\..\\patches\\qtbase_%QT%\\*) do (
-        git apply %%i -v
+        git apply %%i --ignore-whitespace -v
+        if errorlevel 1 (
+            echo ERROR: Applying patch %%~nxi failed!
+            exit /b 1
+        )
+    )
+    cd ..\\qtsvg
+    for /r %%i in (..\\..\\patches\\qtsvg_%QT%\\*) do (
+        git apply %%i --ignore-whitespace -v
         if errorlevel 1 (
             echo ERROR: Applying patch %%~nxi failed!
             exit /b 1
@@ -1731,8 +1723,6 @@ win_asserts:
 win:
     """ + removeDir('"%LIBS_DIR%\\Qt' + qt + '"') + """
     SET MOZJPEG_DIR=%LIBS_DIR%\\mozjpeg
-    SET OPENSSL_DIR=%LIBS_DIR%\\openssl3
-    SET OPENSSL_LIBS_DIR=%OPENSSL_DIR%\\out
     SET ZLIB_LIBS_DIR=%LIBS_DIR%\\zlib
     SET WEBP_DIR=%LIBS_DIR%\\libwebp
     SET LCMS2_DIR=%LIBS_DIR%\\liblcms2
@@ -1745,19 +1735,25 @@ win:
         -static ^
         -static-runtime ^
         -feature-c++20 ^
-        -openssl linked ^
+        -no-openssl ^
         -system-webp ^
         -system-zlib ^
         -system-libjpeg ^
+win32_win64:
+    # ANGLE is restored by qt6_windows7 series, tracing pulls Windows 10 ETW.
+        -trace no ^
+        -feature-egl ^
+win32:
+    # qioring_win.cpp static_asserts on 64-bit pointers, so no IoRing on x86.
+        -no-feature-windows-ioring ^
+win:
         -platform win32-msvc ^
         -D ZLIB_WINAPI ^
         -- ^
-        -D OPENSSL_FOUND=1 ^
-        -D OPENSSL_INCLUDE_DIR="%OPENSSL_DIR%\\include" ^
-        -D LIB_EAY_DEBUG="%OPENSSL_LIBS_DIR%.dbg\\libcrypto.lib" ^
-        -D SSL_EAY_DEBUG="%OPENSSL_LIBS_DIR%.dbg\\libssl.lib" ^
-        -D LIB_EAY_RELEASE="%OPENSSL_LIBS_DIR%\\libcrypto.lib" ^
-        -D SSL_EAY_RELEASE="%OPENSSL_LIBS_DIR%\\libssl.lib" ^
+win32_win64:
+        -D CMAKE_PROJECT_QtBase_INCLUDE:FILEPATH="%QT_ANGLE_CMAKE%" ^
+        -D DESKTOP_APP_ANGLE_DIR:PATH="%LIBS_DIR%\\tg_angle" ^
+win:
         -D JPEG_FOUND=1 ^
         -D JPEG_INCLUDE_DIR="%MOZJPEG_DIR%" ^
         -D JPEG_LIBRARY_DEBUG="%MOZJPEG_DIR%\\Debug\\jpeg-static.lib" ^
@@ -1785,7 +1781,7 @@ win:
 stage('tg_owt', """
     git clone https://github.com/desktop-app/tg_owt.git
     cd tg_owt
-    git checkout d1cf250ea73de26c4c1f0a3c8173eb2648efbb04
+    git checkout 642ddb107b42da7c8d152401b71cd429475e5266
     git submodule update --init --recursive
 win:
     SET MOZJPEG_PATH=$LIBS_DIR/mozjpeg
@@ -1880,27 +1876,6 @@ release:
     lipo -create Release.arm64/libtg_owt.a Release.x86_64/libtg_owt.a -output Release/libtg_owt.a
 """)
 
-stage('ada', """
-    git clone -b v3.2.9 https://github.com/ada-url/ada.git
-    cd ada
-win:
-    cmake -B out . ^
-        -D ADA_TESTING=OFF ^
-        -D ADA_TOOLS=OFF ^
-        -D ADA_INCLUDE_URL_PATTERN=OFF ^
-        -D CMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>"
-    cmake --build out --config Debug
-    cmake --build out --config Release
-mac:
-    CFLAGS="$UNGUARDED" CPPFLAGS="$UNGUARDED" cmake -B build . \\
-        -D ADA_TESTING=OFF \\
-        -D ADA_TOOLS=OFF \\
-        -D CMAKE_OSX_ARCHITECTURES="x86_64;arm64" \\
-        -D CMAKE_INSTALL_PREFIX:STRING=$USED_PREFIX
-    cmake --build build
-    cmake --install build
-""")
-
 stage('tde2e', """
     git clone https://github.com/tdlib/td.git tde2e
     cd tde2e
@@ -1988,14 +1963,14 @@ release:
 tlottieRevision = '92df98dc20'
 walletEngineRevision = 'e59e0d89d7ee90c388bf36e3334c5b276f396697'
 stage('tlottie', """
-version: 2
+version: 3
     git clone https://github.com/dkaraush/tlottie.git
     cd tlottie
     git checkout """ + tlottieRevision + """
 """)
 
 stage('wallet-engine', """
-version: 2
+version: 3
 depends:patches/wallet-engine.patch
 win:
     SET "GIT_LFS_SKIP_SMUDGE=1"
@@ -2024,7 +1999,7 @@ win_mac:
 # flushes a cache whose generated source the CI prune had already deleted.
 # The wallet-engine patch rewrites those sources, so it is a dependency here.
 stage('tdesktop_rust', """
-version: 2.""" + tlottieRevision + '.' + walletEngineRevision + """
+version: 3.""" + tlottieRevision + '.' + walletEngineRevision + """
 depends:patches/wallet-engine.patch
 win:
     SET "RUSTUP_HOME=%THIRDPARTY_DIR%\\rust\\rustup"

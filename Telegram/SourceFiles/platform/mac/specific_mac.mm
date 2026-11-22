@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <sys/mount.h>
 #include <sys/sysctl.h>
 #include <sys/xattr.h>
+#include <unistd.h>
 
 #include <Cocoa/Cocoa.h>
 #include <CoreFoundation/CFURL.h>
@@ -330,6 +331,14 @@ QString SingleInstanceLocalServerName(const QString &hash) {
 #endif // OS_MAC_STORE
 }
 
+bool LocalSocketPeerAllowed(qintptr descriptor) {
+	auto uid = uid_t();
+	auto gid = gid_t();
+	return (descriptor >= 0)
+		&& !getpeereid(int(descriptor), &uid, &gid)
+		&& (uid == geteuid());
+}
+
 #if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
 namespace {
 
@@ -435,6 +444,10 @@ bool OpenSystemSettings(SystemSettingsType type) {
 
 void IgnoreApplicationActivationRightNow() {
 	objc_ignoreApplicationActivationRightNow();
+}
+
+int64 ClipboardChangeCount() {
+	return [[NSPasteboard generalPasteboard] changeCount];
 }
 
 void AutostartToggle(bool enabled, Fn<void(bool)> done) {

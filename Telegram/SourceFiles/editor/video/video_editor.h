@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Ui {
 class IconButton;
+class ImportantTooltip;
 class LayerWidget;
 class RippleButton;
 class FlatLabel;
@@ -23,6 +24,7 @@ class FlatLabel;
 
 namespace Editor {
 
+class CaptionBar;
 class Crop;
 class SegmentPlayer;
 class TimelineSeeker;
@@ -57,9 +59,16 @@ public:
 
 	[[nodiscard]] VideoModifications collect() const;
 
+	[[nodiscard]] TextWithTags caption() const;
+	[[nodiscard]] int period() const;
+	[[nodiscard]] bool edited() const;
+
 private:
 	void setupStreaming();
 	void setupControls();
+	void setupGifButton();
+	void showGifTooltip();
+	void hideGifTooltip();
 	void setupTimeline();
 	void setupQuality();
 	void setupSizeEstimate();
@@ -74,9 +83,25 @@ private:
 	void invalidateCoverPreview();
 	void togglePause();
 	void paintPlayBadge(QPainter &p);
+	void paintCanvas(QPainter &p);
 	void applyGeometry();
 	void paint(QPainter &p);
 	void keyPressEvent(QKeyEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void mouseReleaseEvent(QMouseEvent *e) override;
+	void wheelEvent(QWheelEvent *e) override;
+	bool eventHook(QEvent *e) override;
+
+	void layoutCanvas(QRect contentRect);
+	[[nodiscard]] QRectF canvasMediaRect() const;
+	[[nodiscard]] QRectF canvasBasePlacement() const;
+	[[nodiscard]] float64 canvasScale() const;
+	[[nodiscard]] QSize frameRequestSize() const;
+	void clampCanvasShift();
+	void restoreCanvasPlacement(QRect rect);
+	void zoomCanvas(float64 factor, QPoint about);
+	void canvasChanged();
 
 	const QString _path;
 	const QByteArray _content;
@@ -93,6 +118,7 @@ private:
 	crl::time _till = 0;
 	crl::time _cover = 0;
 	bool _gif = false;
+	bool _gifAllowed = true;
 
 	std::unique_ptr<SegmentPlayer> _player;
 	base::unique_qptr<Crop> _crop;
@@ -100,10 +126,12 @@ private:
 	std::unique_ptr<TimelineSeeker> _seeker;
 	base::unique_qptr<VideoQualitySlider> _quality;
 	base::unique_qptr<Ui::RpWidget> _controls;
+	base::unique_qptr<CaptionBar> _captionBar;
 	base::unique_qptr<Ui::RpWidget> _bar;
 	base::unique_qptr<Ui::IconButton> _rotate;
 	base::unique_qptr<Ui::IconButton> _flip;
 	base::unique_qptr<Ui::IconButton> _gifButton;
+	base::unique_qptr<Ui::ImportantTooltip> _gifTooltip;
 	base::unique_qptr<Ui::RippleButton> _confirm;
 	base::unique_qptr<Ui::RippleButton> _cancelButton;
 	base::unique_qptr<Ui::FlatLabel> _about;
@@ -116,6 +144,15 @@ private:
 	QRect _frameRect;
 	QTransform _frameMatrix;
 	QRect _innerRect;
+	QRect _contentRect;
+	QRect _canvasRect;
+	QRect _mediaRect;
+	float64 _canvasZoom = 1.;
+	QPointF _canvasShift;
+	std::optional<QRect> _canvasRestored;
+	QPointF _canvasDragShift;
+	std::optional<QPoint> _canvasPress;
+	bool _canvasMoved = false;
 	bool _dragging = false;
 	bool _userPaused = false;
 	crl::time _bubbleCover = -1;

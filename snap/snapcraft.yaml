@@ -21,6 +21,7 @@ apps:
       - camera
       - hardware-observe
       - home
+      - login-session-observe
       - network
       - network-bind
       - network-status
@@ -40,7 +41,7 @@ parts:
     source-type: git
     parse-info: [usr/share/metainfo/org.telegram.desktop.metainfo.xml]
     build-environment:
-      - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -Wl,--push-state,--no-as-needed,-ldav1d,--pop-state
+      - PKG_CONFIG_PATH: $CRAFT_STAGE/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
     build-packages:
       - libboost-regex-dev
       - libheif-dev
@@ -85,7 +86,6 @@ parts:
         ln -sfn "$RELATIVE" "$DEST"
       done
     after:
-      - ada
       - avif
       - ffmpeg
       - minizip
@@ -123,27 +123,13 @@ parts:
   patches:
     source: https://github.com/desktop-app/patches.git
     source-depth: 1
-    source-commit: aec474953ff7ee9b6e4cd9b8658288ea86d124f3
+    source-commit: 69f23a834024d6064da209076151393582b3c966
     plugin: nil
     override-pull: |
       craftctl default
       cp -r . "$CRAFT_STAGE/patches"
     override-prime: |
       rm -rf patches
-
-  ada:
-    source: https://github.com/ada-url/ada.git
-    source-depth: 1
-    source-tag: v3.2.9
-    plugin: cmake
-    cmake-generator: Ninja
-    cmake-parameters:
-      - -DCMAKE_BUILD_TYPE=Release
-      - -DCMAKE_INSTALL_PREFIX=/usr
-      - -DADA_TESTING=OFF
-      - -DADA_TOOLS=OFF
-      - -DADA_INCLUDE_URL_PATTERN=OFF
-    prime: [-./*]
 
   avif:
     source: https://github.com/AOMediaCodec/libavif.git
@@ -159,12 +145,15 @@ parts:
       - -DBUILD_SHARED_LIBS=OFF
       - -DAVIF_CODEC_DAV1D=SYSTEM
       - -DAVIF_LIBYUV=OFF
+    override-pull: |
+      craftctl default
+      sed -i 's/ -lavif$/& -Wl,--push-state,--no-as-needed,-ldav1d,--pop-state/' libavif.pc.cmake
     prime: [-./*]
 
   ffmpeg:
     source: https://github.com/FFmpeg/FFmpeg.git
     source-depth: 1
-    source-branch: n6.1.6
+    source-commit: e22a4510c982b048945052bd6a503475014b7ba0
     plugin: autotools
     build-packages:
       - nasm
@@ -283,6 +272,7 @@ parts:
       - --enable-decoder=wmavoice
       - --enable-encoder=aac
       - --enable-encoder=libopenh264
+      - --enable-encoder=libvpx_vp9
       - --enable-encoder=libopus
       - --enable-encoder=pcm_s16le
       - --enable-filter=atempo
@@ -311,12 +301,18 @@ parts:
       - --enable-muxer=ogg
       - --enable-muxer=opus
       - --enable-muxer=wav
+      - --enable-muxer=webm
     override-pull: |
       craftctl default
+      find $CRAFT_STAGE/patches/ffmpeg -type f -name '*.patch' -print0 | sort -z | xargs -r0 git apply -v
       sed -i 's/disable ffnvcodec cuvid nvdec nvenc/:/g' configure
+    override-build: |
+      craftctl default
+      sed -i 's,^\(libdir\|includedir\)=/usr/,\1=${prefix}/,' "$CRAFT_PART_INSTALL/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/pkgconfig"/lib*.pc
     prime: [-./*]
     after:
       - nv-codec-headers
+      - patches
 
   minizip:
     source: https://github.com/madler/zlib.git
@@ -395,7 +391,7 @@ parts:
   qt:
     source: https://github.com/qt/qt5.git
     source-depth: 1
-    source-tag: v6.11.2
+    source-tag: v6.12.0
     source-submodules:
       - qtbase
       - qtdeclarative
@@ -425,12 +421,14 @@ parts:
       - -DINSTALL_LIBDIR=/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR
       - -DBUILD_SHARED_LIBS=OFF
       - -DQT_QPA_PLATFORMS="wayland;xcb"
+      - -DFEATURE_brotli=OFF
       - -DFEATURE_eglfs=OFF
       - -DINPUT_openssl=linked
     override-pull: |
       craftctl default
       QT="$(grep 'set(QT_REPO_MODULE_VERSION' qtbase/.cmake.conf | sed -r 's/.*"(.*)".*/\1/')"
       find $CRAFT_STAGE/patches/qtbase_${QT} -type f -print0 | sort -z | xargs -r0 git -C qtbase apply
+      find $CRAFT_STAGE/patches/qtsvg_${QT} -type f -print0 | sort -z | xargs -r0 git -C qtsvg apply
       find $CRAFT_STAGE/patches/qtwayland_${QT} -type f -print0 | sort -z | xargs -r0 git -C qtwayland apply
     prime: [-./*]
     after:
@@ -526,8 +524,10 @@ parts:
   webrtc:
     source: https://github.com/desktop-app/tg_owt.git
     source-depth: 1
-    source-commit: d1cf250ea73de26c4c1f0a3c8173eb2648efbb04
+    source-commit: 642ddb107b42da7c8d152401b71cd429475e5266
     plugin: cmake
+    build-environment:
+      - PKG_CONFIG_PATH: $CRAFT_STAGE/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
     build-packages:
       - libopenh264-dev
       - libopus-dev

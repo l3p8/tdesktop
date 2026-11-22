@@ -84,6 +84,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_schedule_box.h"
 #include "iv/editor/iv_editor_session.h"
 #include "wallet/wallet_panel.h"
+#include "window/window_columns.h"
 #include "window/window_separate_id.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
@@ -100,6 +101,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_values.h"
 #include "info/statistics/info_statistics_widget.h"
 #include "info/stories/info_stories_widget.h"
+#include "media/stories/media_stories_post.h"
+#include "boxes/story_drafts_box.h"
 #include "data/components/scheduled_messages.h"
 #include "data/components/welcome_messages.h"
 #include "data/notify/data_notify_settings.h"
@@ -307,6 +310,8 @@ private:
 	void addToggleMuteSubmenu(bool addSeparator);
 	void addSupportInfo();
 	void addInfo();
+	void addPostStory();
+	void addStoryDrafts();
 	void addStoryArchive();
 	void addNewWindow(bool addSeparator = true);
 	void addUngroup();
@@ -624,8 +629,8 @@ void Filler::addInfo() {
 	} else if (_controller->adaptive().isThreeColumn()) {
 		const auto thread = _controller->activeChatCurrent().thread();
 		if (thread && !thread->asSublist() && thread == _thread) {
-			if (Core::App().settings().thirdSectionInfoEnabled()
-				|| Core::App().settings().tabbedReplacedWithInfo()) {
+			if (_controller->columns().thirdSectionInfoEnabled()
+				|| _controller->columns().tabbedReplacedWithInfo()) {
 				return;
 			}
 		}
@@ -654,6 +659,30 @@ void Filler::addInfo() {
 			}
 		}
 	}, infoPeer->isUser() ? &st::menuIconProfile : &st::menuIconInfo);
+}
+
+void Filler::addPostStory() {
+	if (!_peer
+		|| _topic
+		|| _sublist
+		|| !Media::Stories::CanPostStory(_peer)) {
+		return;
+	}
+	const auto controller = _controller;
+	const auto peer = _peer;
+	_addAction(tr::lng_story_post_button(tr::now), [=] {
+		Media::Stories::PostStory(controller, peer);
+	}, &st::menuIconStoryPost);
+}
+
+void Filler::addStoryDrafts() {
+	if (!_peer || _topic || _sublist || !_peer->isSelf()) {
+		return;
+	}
+	const auto controller = _controller;
+	_addAction(tr::lng_story_drafts_button(tr::now), [=] {
+		ShowStoryDraftsBox(controller);
+	}, &st::menuIconStoriesSavedSection);
 }
 
 void Filler::addStoryArchive() {
@@ -1940,6 +1969,8 @@ void Filler::fillHistoryActions() {
 	addInfo();
 	addViewAsTopics();
 	addManageChat();
+	addPostStory();
+	addStoryDrafts();
 	addStoryArchive();
 	addSupportInfo();
 	addBoostChat();
@@ -1968,6 +1999,8 @@ void Filler::fillProfileActions() {
 	addSendGift();
 	addSendMoney();
 	addViewStatistics();
+	addPostStory();
+	addStoryDrafts();
 	addStoryArchive();
 	addManageChat();
 	addSetPersonalChannel();
@@ -2261,6 +2294,11 @@ void PeerMenuDeleteTopicWithConfirmation(
 	};
 	const auto controller = navigation->parentController();
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		topic->destroyed(
+		) | rpl::on_next([=] {
+			box->closeBox();
+		}, box->lifetime());
+
 		Ui::AddSkip(box->verticalLayout());
 		Ui::IconWithTitle(
 			box->verticalLayout(),
@@ -2672,7 +2710,11 @@ void PeerMenuEditTodoList(
 			result.options,
 			crl::guard(weak, [=] { weak->closeBox(); }),
 			crl::guard(weak, [=](const QString &error) {
-				weak->submitFailed(error);
+				if (error == u"MESSAGE_NOT_MODIFIED"_q) {
+					weak->closeBox();
+				} else {
+					weak->submitFailed(error);
+				}
 			}));
 	}, box->lifetime());
 	controller->show(std::move(box), Ui::LayerOption::CloseOther);
@@ -2784,6 +2826,8 @@ void PeerMenuBlockUserBox(
 		: nullptr;
 
 	if (allFromUser) {
+		// A long name wraps the label instead of cutting it.
+		allFromUser->setAllowTextLines();
 		box->addSkip(st::boxLittleSkip);
 	}
 
@@ -4322,8 +4366,9 @@ Fn<void()> DeleteAndLeaveHandler(
 	}();
 	if (isCreator) {
 		const auto requestId = std::make_shared<mtpRequestId>(0);
-		return [=] {
-			if (controller->showFrozenError() || (*requestId > 0)) {
+		const auto show = controller->uiShow();
+		const auto leaveAsCreator = [=](Fn<void()> leave) {
+			if (*requestId > 0) {
 				return;
 			}
 			*requestId = peer->session().api().request(
@@ -4331,17 +4376,27 @@ Fn<void()> DeleteAndLeaveHandler(
 					peer->input()
 			)).done([=](const MTPUser &result) {
 				*requestId = 0;
-				const auto user = peer->owner().processUser(result);
-				controller->show(Box(SelectFutureOwnerbox, peer, user));
+				if (result.type() == mtpc_userEmpty) {
+					leave();
+				} else {
+					const auto user = peer->owner().processUser(result);
+					show->show(Box(SelectFutureOwnerbox, peer, user, leave));
+				}
 			}).fail([=](const MTP::Error &error) {
 				*requestId = 0;
-				controller->show(Box(DeleteChatBox, peer));
+				leave();
 			}).send();
+		};
+		return [=] {
+			if (controller->showFrozenError() || (*requestId > 0)) {
+				return;
+			}
+			controller->show(Box(DeleteChatBox, peer, leaveAsCreator));
 		};
 	}
 	return [=] {
 		if (!controller->showFrozenError()) {
-			controller->show(Box(DeleteChatBox, peer));
+			controller->show(Box(DeleteChatBox, peer, nullptr));
 		}
 	};
 }

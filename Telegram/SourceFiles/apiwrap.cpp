@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_authorizations.h"
 #include "api/api_attached_stickers.h"
 #include "api/api_blocked_peers.h"
+#include "api/api_bot_info.h"
 #include "api/api_chat_invite.h"
 #include "api/api_chat_links.h"
 #include "api/api_chat_participants.h"
@@ -20,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_media.h"
 #include "api/api_peer_colors.h"
 #include "api/api_peer_photo.h"
+#include "api/api_stories.h"
 #include "api/api_polls.h"
 #include "api/api_sending.h"
 #include "api/api_text_entities.h"
@@ -27,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_todo_lists.h"
 #include "api/api_self_destruct.h"
 #include "api/api_sensitive_content.h"
+#include "api/api_share_themes.h"
 #include "api/api_global_privacy.h"
 #include "api/api_reactions_notify_settings.h"
 #include "api/api_updates.h"
@@ -107,6 +110,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/download_manager_mtproto.h"
 #include "storage/file_upload.h"
 #include "storage/storage_account.h"
+#include "tgw/tgw_storage.h"
 
 namespace {
 
@@ -174,6 +178,29 @@ void ShowChannelsLimitBox(not_null<PeerData*> peer) {
 		action.replaceMediaOf);
 }
 
+[[nodiscard]] std::unique_ptr<FileLoadTask> PrepareVideoCoverTask(
+		not_null<Main::Session*> session,
+		Ui::PreparedFile &file,
+		const FileLoadTo &to) {
+	return file.videoCover
+		? std::make_unique<FileLoadTask>(FileLoadTask::Args{
+			.session = session,
+			.filepath = file.videoCover->path,
+			.content = file.videoCover->content,
+			.information = std::move(file.videoCover->information),
+			.videoCover = nullptr,
+			.type = SendMediaType::Photo,
+			.to = to,
+			.caption = TextWithTags(),
+			.spoiler = false,
+			.album = nullptr,
+			.forceFile = false,
+			.sendLargePhotos = false,
+			.idOverride = 0,
+		})
+		: nullptr;
+}
+
 [[nodiscard]] QString FormatVideoTimestamp(TimeId seconds) {
 	const auto minutes = seconds / 60;
 	const auto hours = minutes / 60;
@@ -182,6 +209,20 @@ void ShowChannelsLimitBox(not_null<PeerData*> peer) {
 		: minutes
 		? u"%1m%2s"_q.arg(minutes).arg(seconds % 60)
 		: QString::number(seconds);
+}
+
+[[nodiscard]] MessageIdsList SentMessageIds(
+		const MTPUpdates &updates,
+		PeerId peerId) {
+	auto result = MessageIdsList();
+	updates.match([&](const MTPDupdates &data) {
+		for (const auto &update : data.vupdates().v) {
+			update.match([&](const MTPDupdateMessageID &id) {
+				result.push_back(FullMsgId(peerId, id.vid().v));
+			}, [](const auto &) {});
+		}
+	}, [](const auto &) {});
+	return result;
 }
 
 } // namespace
@@ -221,6 +262,7 @@ ApiWrap::ApiWrap(not_null<Main::Session*> session)
 , _readMetrics(std::make_unique<Api::ReadMetrics>(this))
 , _confirmPhone(std::make_unique<Api::ConfirmPhone>(this))
 , _peerPhoto(std::make_unique<Api::PeerPhoto>(this))
+, _stories(std::make_unique<Api::Stories>(this))
 , _polls(std::make_unique<Api::Polls>(this))
 , _todoLists(std::make_unique<Api::TodoLists>(this))
 , _richTasks(std::make_unique<Api::RichTasks>(this))
@@ -233,7 +275,10 @@ ApiWrap::ApiWrap(not_null<Main::Session*> session)
 , _premium(std::make_unique<Api::Premium>(this))
 , _usernames(std::make_unique<Api::Usernames>(this))
 , _websites(std::make_unique<Api::Websites>(this))
-, _peerColors(std::make_unique<Api::PeerColors>(this)) {
+, _peerColors(std::make_unique<Api::PeerColors>(this))
+, _shareThemes(std::make_unique<Api::ShareThemes>(this))
+, _botInfoLocalizations(
+	std::make_unique<Api::BotInfoLocalizations>()) {
 	crl::on_main(session, [=] {
 		// You can't use _session->lifetime() in the constructor,
 		// only queued, because it is not constructed yet.
@@ -256,14 +301,7 @@ void ApiWrap::ProcessRecentSelfForwards(
 		const MTPUpdates &updates,
 		PeerId targetPeerId,
 		PeerId fromPeerId) {
-	auto newIds = MessageIdsList();
-	updates.match([&](const MTPDupdates &data) {
-		for (const auto &update : data.vupdates().v) {
-			update.match([&](const MTPDupdateMessageID &d) {
-				newIds.push_back(FullMsgId(targetPeerId, d.vid().v));
-			}, [](const auto &) {});
-		}
-	}, [](const auto &) {});
+	const auto newIds = SentMessageIds(updates, targetPeerId);
 	if (!newIds.empty()) {
 		session->data().addRecentSelfForwards({
 			.fromPeerId = fromPeerId,
@@ -633,6 +671,9 @@ void ApiWrap::sendMessageFail(
 				topic->setClosed(true);
 			}
 		}
+	}
+	if (itemId) {
+		_session->data().histories().checkReplyTargetSent(itemId, MsgId());
 	}
 }
 
@@ -1488,6 +1529,7 @@ void ApiWrap::markContentsRead(not_null<HistoryItem*> item) {
 void ApiWrap::deleteAllFromParticipant(
 		not_null<ChannelData*> channel,
 		not_null<PeerData*> from) {
+	Tgw::ClearParticipantStorage(_session, channel->id, from->id);
 	const auto history = _session->data().historyLoaded(channel);
 	const auto ids = history
 		? history->collectMessagesFromParticipantToDelete(from)
@@ -2192,7 +2234,9 @@ void ApiWrap::clearHistory(not_null<PeerData*> peer, bool revoke) {
 }
 
 void ApiWrap::deleteConversation(not_null<PeerData*> peer, bool revoke) {
-	if (const auto chat = peer->asChat()) {
+	const auto chat = peer->asChat();
+	// Leaving first hands a legacy group to its successor at once.
+	if (chat && !(revoke && chat->amCreator())) {
 		request(MTPmessages_DeleteChatUser(
 			MTP_flags(0),
 			chat->inputChat(),
@@ -2697,11 +2741,6 @@ void ApiWrap::clearWebPageRequest(not_null<WebPageData*> page) {
 	}
 }
 
-void ApiWrap::clearWebPageRequests() {
-	_webPagesPending.clear();
-	_webPagesTimer.cancel();
-}
-
 void ApiWrap::resolveWebPages() {
 	auto ids = QVector<MTPInputMessage>(); // temp_req_id = -1
 	using IndexAndMessageIds = QPair<int32, QVector<MTPInputMessage>>;
@@ -2900,6 +2939,10 @@ void ApiWrap::refreshFileReference(
 				request(MTPstories_GetStoriesByID(
 					_session->data().peer(storyId.peer)->input(),
 					MTP_vector<MTPint>(1, MTP_int(storyId.story))));
+			} else if ((item->isScheduled() || item->isBusinessShortcut())
+				&& (item->isSending() || item->hasFailed())) {
+				// Not sent yet, there is no server id to request.
+				fail();
 			} else if (item->isScheduled()) {
 				const auto realId = _session->scheduledMessages().lookupId(
 					item);
@@ -3891,10 +3934,11 @@ void ApiWrap::finishForwarding(const SendAction &action) {
 	}
 }
 
-void ApiWrap::forwardMessages(
+FullMsgId ApiWrap::forwardMessages(
 		Data::ResolvedForwardDraft &&draft,
 		SendAction action,
-		FnMut<void()> &&successCallback) {
+		FnMut<void()> &&successCallback,
+		Fn<void(const MessageIdsList&)> sentCallback) {
 	Expects(!draft.items.empty());
 
 	auto &histories = _session->data().histories();
@@ -3912,7 +3956,7 @@ void ApiWrap::forwardMessages(
 		if (successCallback) {
 			successCallback();
 		}
-		return;
+		return {};
 	}
 	draft.options = HistoryView::Controls::NormalizeForwardOptions(
 		_session,
@@ -3924,7 +3968,10 @@ void ApiWrap::forwardMessages(
 		if (successCallback) {
 			successCallback();
 		}
-		return;
+		if (sentCallback) {
+			sentCallback({});
+		}
+		return {};
 	}
 
 	struct SharedCallback {
@@ -4006,6 +4053,7 @@ void ApiWrap::forwardMessages(
 	auto ids = QVector<MTPint>();
 	auto randomIds = QVector<MTPlong>();
 	auto localIds = std::shared_ptr<base::flat_map<uint64, FullMsgId>>();
+	auto localId = FullMsgId();
 
 	const auto sendAccumulated = [&] {
 		if (ids.isEmpty()) {
@@ -4079,6 +4127,9 @@ void ApiWrap::forwardMessages(
 					_session->api().updates().checkForSentToScheduled(
 						result);
 				}
+				if (sentCallback) {
+					sentCallback(SentMessageIds(result, peer->id));
+				}
 				if (shared && !--shared->requestsLeft) {
 					shared->callback();
 				}
@@ -4091,6 +4142,9 @@ void ApiWrap::forwardMessages(
 				}
 			},
 			[=](const MTP::Error &error, const MTP::Response &) {
+				if (sentCallback) {
+					sentCallback({});
+				}
 				if (idsCopy) {
 					for (const auto &[randomId, itemId] : *idsCopy) {
 						_session->api().sendMessageFail(
@@ -4140,6 +4194,7 @@ void ApiWrap::forwardMessages(
 					localIds = std::make_shared<base::flat_map<uint64, FullMsgId>>();
 				}
 				localIds->emplace(randomId, newId);
+				localId = newId;
 			}
 			const auto newFrom = item->history()->peer;
 			if (forwardFrom != newFrom) {
@@ -4154,6 +4209,7 @@ void ApiWrap::forwardMessages(
 		sendAccumulated();
 	}
 	_session->data().sendHistoryChangeNotifications();
+	return localId;
 }
 
 void ApiWrap::shareContact(
@@ -4257,6 +4313,7 @@ void ApiWrap::sendVoiceMessage(
 		VoiceWaveform waveform,
 		crl::time duration,
 		bool video,
+		std::shared_ptr<Media::Encode::VideoSource> videoSource,
 		const SendAction &action) {
 	const auto caption = TextWithTags();
 	const auto to = FileLoadTaskOptions(action);
@@ -4267,6 +4324,7 @@ void ApiWrap::sendVoiceMessage(
 			.duration = duration,
 			.waveform = waveform,
 			.video = video,
+			.videoSource = std::move(videoSource),
 			.to = to,
 			.caption = caption,
 		}));
@@ -4300,23 +4358,7 @@ void ApiWrap::editMedia(
 		.filepath = file.path,
 		.content = file.content,
 		.information = std::move(file.information),
-		.videoCover = (file.videoCover
-			? std::make_unique<FileLoadTask>(FileLoadTask::Args{
-				.session = &session(),
-				.filepath = file.videoCover->path,
-				.content = file.videoCover->content,
-				.information = std::move(file.videoCover->information),
-				.videoCover = nullptr,
-				.type = SendMediaType::Photo,
-				.to = to,
-				.caption = TextWithTags(),
-				.spoiler = false,
-				.album = nullptr,
-				.forceFile = false,
-				.sendLargePhotos = false,
-				.idOverride = 0,
-			})
-			: nullptr),
+		.videoCover = PrepareVideoCoverTask(&session(), file, to),
 		.type = type,
 		.to = to,
 		.caption = caption,
@@ -4377,23 +4419,7 @@ void ApiWrap::sendFiles(
 			.filepath = file.path,
 			.content = file.content,
 			.information = std::move(file.information),
-			.videoCover = (file.videoCover
-				? std::make_unique<FileLoadTask>(FileLoadTask::Args{
-					.session = &session(),
-					.filepath = file.videoCover->path,
-					.content = file.videoCover->content,
-					.information = std::move(file.videoCover->information),
-					.videoCover = nullptr,
-					.type = SendMediaType::Photo,
-					.to = to,
-					.caption = TextWithTags(),
-					.spoiler = false,
-					.album = nullptr,
-					.forceFile = false,
-					.sendLargePhotos = false,
-					.idOverride = 0,
-				})
-				: nullptr),
+			.videoCover = PrepareVideoCoverTask(&session(), file, to),
 			.type = uploadWithType,
 			.to = fileTo,
 			.caption = std::move(file.caption),
@@ -4803,7 +4829,7 @@ void ApiWrap::sendMessage(
 		_session->user()).flags;
 	TextUtilities::PrepareForSending(left, prepareFlags);
 
-	HistoryItem *lastMessage = nullptr;
+	auto lastMessage = (HistoryItem*)nullptr;
 
 	auto &histories = history->owner().histories();
 	const auto messageLengthLimit = Data::PremiumLimits(
@@ -4965,6 +4991,7 @@ void ApiWrap::sendMessage(
 				sendMessageFail(error, peer, randomId, newId);
 				if (!action.options.scheduled
 					&& !action.options.shortcutId) {
+					Core::App().materializeLocalDrafts();
 					const auto failed = _session->data().message(newId);
 					const auto local = history->localDraft(
 						draftTopicRootId,
@@ -4975,7 +5002,8 @@ void ApiWrap::sendMessage(
 					if (failed
 						&& Data::DraftIsNull(local)
 						&& Data::DraftIsNull(cloud)) {
-						const auto text = failed->originalText();
+						const auto text = PreventInlineBotQuery(
+							failed->originalText());
 						auto draft = Data::Draft();
 						draft.textWithTags = {
 							text.text,
@@ -5448,7 +5476,7 @@ void ApiWrap::sendMultiPaidMedia(
 	const auto groupId = album->groupId;
 	auto &options = album->options;
 	const auto randomId = album->items.front().randomId;
-	auto medias = album->items | ranges::view::transform([](
+	auto medias = album->items | ranges::views::transform([](
 			const SendingAlbum::Item &part) {
 		Assert(part.media.has_value());
 		return MTPInputMedia(part.media->data().vmedia());
@@ -5880,6 +5908,10 @@ Api::PeerPhoto &ApiWrap::peerPhoto() {
 	return *_peerPhoto;
 }
 
+Api::Stories &ApiWrap::stories() {
+	return *_stories;
+}
+
 Api::Polls &ApiWrap::polls() {
 	return *_polls;
 }
@@ -5930,4 +5962,12 @@ Api::Websites &ApiWrap::websites() {
 
 Api::PeerColors &ApiWrap::peerColors() {
 	return *_peerColors;
+}
+
+Api::ShareThemes &ApiWrap::shareThemes() {
+	return *_shareThemes;
+}
+
+Api::BotInfoLocalizations &ApiWrap::botInfoLocalizations() {
+	return *_botInfoLocalizations;
 }
