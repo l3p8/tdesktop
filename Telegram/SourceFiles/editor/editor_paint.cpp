@@ -14,15 +14,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "core/mime_type.h"
 #include "core/shortcuts.h"
+#include "data/stickers/data_stickers.h"
+#include "data/data_document.h"
 #include "data/data_location.h"
 #include "data/data_peer.h"
-#include "data/data_document.h"
 #include "data/data_session.h"
-#include "data/stickers/data_stickers.h"
 #include "editor/controllers/controllers.h"
-#include "editor/editor_link_box.h"
-#include "editor/editor_message_render.h"
-#include "editor/editor_message_source.h"
+#include "editor/scene/scene.h"
+#include "editor/scene/scene_draft.h"
 #include "editor/scene/scene_item_canvas.h"
 #include "editor/scene/scene_item_image.h"
 #include "editor/scene/scene_item_line.h"
@@ -35,8 +34,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/scene/scene_item_text.h"
 #include "editor/scene/scene_item_video.h"
 #include "editor/scene/scene_item_weather.h"
-#include "editor/scene/scene_draft.h"
-#include "editor/scene/scene.h"
+#include "editor/editor_gif.h"
+#include "editor/editor_link_box.h"
+#include "editor/editor_message_render.h"
+#include "editor/editor_message_source.h"
 #include "editor/editor_weather.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -50,11 +51,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/confirm_box.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/controls/location_picker.h"
+#include "ui/emoji_config.h"
 #include "ui/rect.h"
 #include "ui/ui_utility.h"
 
 #include <QtGui/QGuiApplication>
 #include "window/themes/window_theme.h"
+
 #include "styles/style_editor.h"
 
 #include <QGraphicsView>
@@ -241,9 +244,24 @@ Paint::Paint(
 
 	if (controllers->stickersPanelController) {
 		using ShowRequest = StickersPanelController::ShowRequest;
+		const auto panel = controllers->stickersPanelController.get();
+		_scene->setTextEmojiPanel(panel->textEmojiPanel());
+		panel->textEmojiChosen() | rpl::on_next([=](EmojiPtr emoji) {
+			panel->hideTextEmojiPanel();
+			_scene->insertText(emoji->text());
+		}, lifetime());
+		_textEditing.changes() | rpl::filter([](bool editing) {
+			return !editing;
+		}) | rpl::on_next([=] {
+			panel->hideTextEmojiPanel();
+		}, lifetime());
 
 		controllers->stickersPanelController->setShowRequestChanges(
 			rpl::merge(
+				panel->emojiChosen(
+				) | rpl::map_to(ShowRequest::HideAnimated),
+				panel->gifChosen(
+				) | rpl::map_to(ShowRequest::HideAnimated),
 				controllers->stickersPanelController->stickerChosen(
 				) | rpl::map_to(ShowRequest::HideAnimated),
 				controllers->stickersPanelController->photoRequests(
@@ -264,6 +282,33 @@ Paint::Paint(
 			addMediaItem(std::make_shared<ItemSticker>(
 				document,
 				itemBaseData()));
+		}, lifetime());
+
+		panel->emojiChosen() | rpl::on_next([=](EmojiPtr emoji) {
+			const auto side = Ui::Emoji::GetSizeLarge();
+			auto image = QImage(
+				side,
+				side,
+				QImage::Format_ARGB32_Premultiplied);
+			image.setDevicePixelRatio(style::DevicePixelRatio());
+			image.fill(Qt::transparent);
+			{
+				auto p = QPainter(&image);
+				Ui::Emoji::Draw(p, emoji, side, 0, 0);
+			}
+			auto data = itemBaseData();
+			data.size /= 2;
+			addMediaItem(
+				std::make_shared<ItemImage>(
+					Ui::PixmapFromImage(std::move(image)),
+					data));
+		}, lifetime());
+		panel->gifChosen() | rpl::on_next([=](
+			not_null<DocumentData*> gif) {
+			auto addGif = [=](Storage::PhotoEditorMedia &&media) {
+				addMedia(std::move(media));
+			};
+			LoadGif(this, gif, std::move(addGif));
 		}, lifetime());
 
 		controllers->stickersPanelController->photoRequests(
@@ -1292,12 +1337,6 @@ void Paint::setBackgroundVideoLocked(bool locked) {
 	}
 }
 
-bool Paint::isBackgroundVideoLocked() const {
-	if (const auto video = backgroundVideo()) {
-		return video->isBackgroundLocked();
-	}
-	return false;
-}
 void Paint::addStoryVideoObject(StoryVideoObject &&object) {
 	const auto thumbnail = object.thumbnail;
 	auto source = std::make_shared<VideoClipSource>(VideoClipSource{
@@ -1497,7 +1536,9 @@ void Paint::addStoryItems(const QJsonArray &items, Fn<QString(int)> file) {
 		item->setEditCallback(crl::guard(this, [=](not_null<ItemLink*> item) {
 			chooseLink(item->link().url, item);
 		}));
-		item->applyPlacement(link.placement);
+		auto placement = link.placement;
+		placement.aspectRatio = item->placement().aspectRatio;
+		item->applyPlacement(placement);
 		addMediaItem(std::move(item));
 	}
 	const auto controller = _controllers->stickersPanelController.get();

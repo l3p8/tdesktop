@@ -7,15 +7,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/stories/media_stories_post.h"
 
-#include "media/stories/media_stories_discard_prompt.h"
-
 #include "apiwrap.h"
-#include "boxes/premium_preview_box.h"
-#include "boxes/send_story_box.h"
-#include "boxes/story_drafts_box.h"
-
 #include "base/random.h"
 #include "base/variant.h"
+#include "boxes/premium_preview_box.h"
+#include "boxes/premium_story_limits_box.h"
+#include "boxes/send_story_box.h"
+#include "boxes/story_drafts_box.h"
 #include "chat_helpers/compose/compose_show.h"
 #include "core/file_utilities.h"
 #include "core/mime_type.h"
@@ -26,42 +24,42 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer.h"
 #include "data/data_photo.h"
 #include "data/data_photo_media.h"
-#include "data/data_premium_limits.h"
 #include "data/data_session.h"
 #include "data/data_stories.h"
 #include "data/data_story.h"
 #include "data/data_story_drafts.h"
 #include "data/data_user.h"
-#include "editor/editor_enhance.h"
-#include "editor/editor_layer_widget.h"
-#include "editor/editor_message_source.h"
-#include "history/history.h"
-#include "history/history_item.h"
-#include "history/history_item_components.h"
-#include "editor/editor_story_areas.h"
-#include "editor/photo_editor.h"
-#include "editor/photo_editor_common.h"
 #include "editor/scene/scene.h"
 #include "editor/scene/scene_draft.h"
 #include "editor/scene/scene_item_video.h"
+#include "editor/editor_enhance.h"
+#include "editor/editor_layer_widget.h"
+#include "editor/editor_message_source.h"
+#include "editor/editor_story_areas.h"
+#include "editor/photo_editor.h"
+#include "editor/photo_editor_common.h"
+#include "history/history.h"
+#include "history/history_item.h"
+#include "history/history_item_components.h"
 #include "info/channel_statistics/boosts/info_boosts_widget.h"
 #include "info/info_memento.h"
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
+#include "media/stories/media_stories_discard_prompt.h"
 #include "media/media_video_canvas.h"
 #include "media/media_video_encode.h"
 #include "media/media_video_frames.h"
 #include "storage/file_download_web.h"
 #include "storage/localimageloader.h"
 #include "storage/storage_media_prepare.h"
-#include "ui/boxes/confirm_box.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/image/image.h"
 #include "ui/layers/generic_box.h"
 #include "ui/text/text_utilities.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
+
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
 
@@ -129,17 +127,19 @@ void SetupStoryEditorClose(
 		const StoryEditorSetup &setup,
 		Fn<void()> close,
 		Fn<void()> saveDraft) {
-	raw->cancelRequests() | rpl::on_next([=] {
+	const auto cancel = [=] {
+		const auto periodChanged = !setup.preview
+			&& raw->period() != InitialPeriod(setup);
 		const auto changed = raw->edited()
 			|| (raw->caption() != setup.caption)
-			|| (raw->period() != InitialPeriod(setup));
+			|| periodChanged;
 		if (!changed) {
 			close();
 			return;
 		}
-		ShowDiscardStoryPrompt(promptParent, {
+		auto args = DiscardStoryArgs{
 			.draft = (setup.draftId != 0),
-			.allowDraft = !setup.editing,
+			.allowDraft = !setup.editing && !setup.preview,
 			.discard = [=] {
 				if (setup.draftId) {
 					Drafts(controller).remove(setup.draftId);
@@ -147,8 +147,10 @@ void SetupStoryEditorClose(
 				close();
 			},
 			.saveDraft = saveDraft,
-		});
-	}, raw->lifetime());
+		};
+		ShowDiscardStoryPrompt(promptParent, std::move(args));
+	};
+	raw->cancelRequests() | rpl::on_next(cancel, raw->lifetime());
 }
 
 [[nodiscard]] Editor::StoryOptions StoryEditorOptions(
@@ -159,6 +161,8 @@ void SetupStoryEditorClose(
 		.caption = setup.caption,
 		.period = setup.period ? setup.period : Api::kStoryDefaultPeriod,
 		.periodChoice = !setup.editing,
+		.showCaption = !setup.preview,
+		.showStoryAreas = !setup.preview,
 		.sceneItems = setup.sceneItems,
 		.sceneFiles = setup.sceneFiles,
 		.storyAudio = setup.storyAudio,
@@ -170,6 +174,8 @@ void SetupStoryEditorClose(
 [[nodiscard]] QString StoryEditorConfirm(const StoryEditorSetup &setup) {
 	return setup.editing
 		? tr::lng_box_done(tr::now)
+		: setup.preview
+		? tr::lng_bot_media_previews_add(tr::now)
 		: tr::lng_intro_next(tr::now);
 }
 
@@ -409,6 +415,12 @@ void SetupStoryEditorClose(
 	};
 }
 
+[[nodiscard]] QString StoryAudioTitle(const Editor::AudioTrack &audio) {
+	return (audio.title.isEmpty() && audio.performer.isEmpty())
+		? QFileInfo(audio.path).completeBaseName()
+		: audio.title;
+}
+
 [[nodiscard]] Api::SendStoryMedia StoryPhotoMedia(
 		QImage composed,
 		const QImage &image,
@@ -469,9 +481,23 @@ void SetupStoryEditorClose(
 			.maxDuration = Api::kStoryVideoMaxDuration,
 		});
 	job.silentLoop = false;
+	auto music = std::optional<Api::StoryMusicFile>();
+	if (const auto audio = mods.paint ? mods.paint->audio() : nullptr) {
+		if (!audio->empty() && audio->volume > 0.) {
+			music = Api::StoryMusicFile{
+				.path = audio->path,
+				.content = audio->content,
+				.title = StoryAudioTitle(*audio),
+				.performer = audio->performer,
+				.cover = audio->cover,
+				.duration = audio->duration,
+			};
+		}
+	}
 	return Api::SendStoryVideo{
 		.cover = std::move(composed),
 		.job = std::make_shared<Media::Encode::Job>(std::move(job)),
+		.music = std::move(music),
 	};
 }
 
@@ -761,7 +787,7 @@ struct CollectedStoryDraft {
 		if (const auto audio = mods.paint->audio()) {
 			if (!audio->empty()) {
 				auto &to = draft.audio;
-				to.title = audio->title;
+				to.title = StoryAudioTitle(*audio);
 				to.performer = audio->performer;
 				to.duration = audio->duration;
 				to.from = audio->from;
@@ -902,11 +928,25 @@ void OpenStoryPhotoEditor(
 			collected.media,
 			close);
 	});
-	raw->doneRequests(
-	) | rpl::on_next([=](const Editor::PhotoModifications &mods) {
+	const auto submit = [=](const Editor::PhotoModifications &mods) {
 		auto result = ComposeStoryPhoto(image, background, mods);
 		if (result.isNull()) {
 			controller->showToast(tr::lng_bad_photo(tr::now));
+			return;
+		}
+		if (setup.preview) {
+			auto media = StoryPhotoMedia(
+				std::move(result),
+				image,
+				videoBased,
+				background,
+				mods,
+				original);
+			auto edited = StoryEditorResult{
+				.media = std::move(media),
+				.mediaChanged = raw->edited(),
+			};
+			done(std::move(edited), close);
 			return;
 		}
 		auto areas = CollectAreas(mods, result.size());
@@ -941,7 +981,8 @@ void OpenStoryPhotoEditor(
 					.fingerprint = fingerprint,
 				}),
 		}, close);
-	}, raw->lifetime());
+	};
+	raw->doneRequests() | rpl::on_next(submit, raw->lifetime());
 	raw->saveRequests(
 	) | rpl::on_next([=](const Editor::PhotoModifications &mods) {
 		SaveStoryToFile(
@@ -1075,20 +1116,6 @@ void WaitForStoryMedia(
 	}), waiting->lifetime);
 }
 
-void ShowLimitBox(
-		not_null<Window::SessionController*> controller,
-		rpl::producer<TextWithEntities> text) {
-	controller->show(Ui::MakeConfirmBox({
-		.text = std::move(text),
-		.confirmed = Fn<void(Fn<void()>)>([=](Fn<void()> close) {
-			close();
-			ShowPremiumPreviewBox(controller, PremiumFeature::Stories);
-		}),
-		.confirmText = tr::lng_premium_more_about(),
-		.title = tr::lng_story_limit_title(),
-	}));
-}
-
 constexpr auto kWebAppStoryShareMaxFileSize = int64(100 * 1024 * 1024);
 constexpr auto kWebAppStoryShareFileLife = 24 * 60 * 60;
 
@@ -1189,6 +1216,12 @@ void OpenWebAppStoryDownload(
 	loader->start();
 }
 
+[[nodiscard]] bool CanPostRepost(Main::Session &session) {
+	return CanPostStory(session.user())
+		&& (!session.appConfig().storiesPostingPremiumOnly()
+			|| session.premium());
+}
+
 } // namespace
 
 void ChooseStoryMedia(
@@ -1196,11 +1229,14 @@ void ChooseStoryMedia(
 		not_null<PeerData*> peer,
 		StoryEditorSetup setup,
 		StoryEditorDone done,
-		Fn<void()> selected) {
+		Fn<void()> selected,
+		Fn<bool()> valid) {
 	const auto parent = controller->widget();
 	const auto premium = controller->session().premium();
-	const auto callback = crl::guard(controller, [=](
-			FileDialog::OpenResult &&result) {
+	const auto callback = [=](FileDialog::OpenResult &&result) {
+		if (valid && !valid()) {
+			return;
+		}
 		const auto showError = [=](tr::phrase<> text) {
 			controller->showToast(text(tr::now));
 		};
@@ -1219,12 +1255,12 @@ void ChooseStoryMedia(
 			}
 			EditStoryFile(controller, std::move(*list), setup, done);
 		}
-	});
+	};
 	FileDialog::GetOpenPath(
 		parent.get(),
 		tr::lng_story_choose_media(tr::now),
 		FileDialog::PhotoVideoFilesFilter(),
-		callback);
+		crl::guard(controller, callback));
 }
 
 bool CanPostStory(not_null<PeerData*> peer) {
@@ -1236,12 +1272,11 @@ bool CanRepostStory(not_null<Data::Story*> story) {
 	return !story->mine()
 		&& story->canShare()
 		&& (story->photo() || story->document())
-		&& CanPostStory(story->session().user());
+		&& CanPostRepost(story->session());
 }
 
 bool CanRepostMessageToStory(not_null<HistoryItem*> item) {
-	const auto session = &item->history()->session();
-	if (!CanPostStory(session->user())) {
+	if (!CanPostRepost(item->history()->session())) {
 		return false;
 	} else if (item->isSponsored() || item->isService()) {
 		return false;
@@ -1559,6 +1594,7 @@ void EditStory(
 				.path = source.draft.audioPath,
 				.title = source.draft.audio.title,
 				.performer = source.draft.audio.performer,
+				.cover = source.draft.audioCover,
 				.duration = source.draft.audio.duration,
 				.from = source.draft.audio.from,
 				.till = source.draft.audio.till,
@@ -1585,6 +1621,23 @@ void EditStory(
 					source.send);
 			}
 			if (captionChanged || result.mediaChanged) {
+				using Video = Api::SendStoryVideo;
+				auto &media = result.media;
+				const auto video = std::get_if<Video>(&media);
+				const auto removeMusic = result.mediaChanged
+					&& fromSource
+					&& !setup.storyAudio.empty()
+					&& (*found)->music()
+					&& (!video || !video->music);
+				const auto &original = setup.storyAudio.path;
+				if (fromSource
+					&& video
+					&& video->music
+					&& (*found)->music()
+					&& !original.isEmpty()
+					&& video->music->path == original) {
+					video->music.reset();
+				}
 				session->api().stories().send({
 					.peer = (*found)->peer(),
 					.media = (result.mediaChanged
@@ -1598,6 +1651,7 @@ void EditStory(
 					.channelPosts = std::move(result.channelPosts),
 					.editId = (*found)->id(),
 					.editCaption = captionChanged,
+					.removeMusic = removeMusic,
 					.sent = pending
 						? Fn<void(StoryId, TimeId)>(
 							[=](StoryId, TimeId expiresAt) {
@@ -1666,15 +1720,43 @@ void EditStory(
 		return;
 	}
 	if (const auto photo = story->photo()) {
+		EditStoryMedia(
+			controller,
+			not_null(photo),
+			origin,
+			setup,
+			done);
+	} else if (const auto document = story->document()) {
+		EditStoryMedia(
+			controller,
+			not_null(document),
+			origin,
+			setup,
+			done);
+	}
+}
+
+void EditStoryMedia(
+		not_null<Window::SessionController*> controller,
+		CloudStoryMedia media,
+		Data::FileOrigin origin,
+		StoryEditorSetup setup,
+		StoryEditorDone done,
+		Fn<bool()> valid) {
+	const auto photo = [&](not_null<PhotoData*> photo) {
 		const auto media = photo->createMediaView();
 		media->wanted(Data::PhotoSize::Large, origin);
 		const auto ready = [=] {
 			return (media->image(Data::PhotoSize::Large) != nullptr);
 		};
 		const auto failed = [=] {
-			return photo->failed(Data::PhotoSize::Large);
+			return (valid && !valid())
+				|| photo->failed(Data::PhotoSize::Large);
 		};
-		WaitForStoryMedia(controller, ready, failed, [=] {
+		const auto open = [=] {
+			if (valid && !valid()) {
+				return;
+			}
 			OpenStoryPhotoEditor(
 				controller,
 				media->image(Data::PhotoSize::Large)->original(),
@@ -1684,17 +1766,23 @@ void EditStory(
 				{},
 				{},
 				done);
-		});
-	} else if (const auto document = story->document()) {
+		};
+		WaitForStoryMedia(controller, ready, failed, open);
+	};
+	const auto video = [&](not_null<DocumentData*> document) {
 		const auto media = document->createMediaView();
 		document->save(origin, QString());
 		const auto ready = [=] {
 			return media->loaded();
 		};
 		const auto failed = [=] {
-			return (document->status == FileDownloadFailed);
+			return (valid && !valid())
+				|| (document->status == FileDownloadFailed);
 		};
-		WaitForStoryMedia(controller, ready, failed, [=] {
+		const auto open = [=] {
+			if (valid && !valid()) {
+				return;
+			}
 			const auto path = document->filepath();
 			const auto content = path.isEmpty()
 				? media->bytes()
@@ -1721,8 +1809,10 @@ void EditStory(
 				{},
 				{},
 				done);
-		});
-	}
+		};
+		WaitForStoryMedia(controller, ready, failed, open);
+	};
+	v::match(media, photo, video);
 }
 
 void EditStoryPrivacy(
@@ -1841,9 +1931,6 @@ void ShowCanSendStoryError(
 		const Api::CanSendStory &result,
 		CanSendStoryErrorContext ctx) {
 	using Type = Api::CanSendStory::Type;
-	const auto session = &controller->session();
-	const auto premium = session->premium();
-	const auto limits = Data::PremiumLimits(session);
 	const auto stopLoading = [&] {
 		if (ctx.setLoading) {
 			ctx.setLoading(false);
@@ -1857,52 +1944,28 @@ void ShowCanSendStoryError(
 		ShowPremiumPreviewBox(controller, PremiumFeature::Stories);
 		return;
 	case Type::BoostsRequired:
-		controller->showToast(tr::lng_story_boosts_required(tr::now));
 		if (peer->isChannel()) {
 			if (ctx.openBoosts) {
 				ctx.openBoosts();
 			} else {
-				controller->showSection(Info::Boosts::Make(peer));
+				controller->showSection(
+					Info::Boosts::MakeForStory(peer));
 			}
 		} else {
 			stopLoading();
+			controller->showToast(
+				tr::lng_story_boosts_required(tr::now));
 		}
 		return;
 	case Type::CountLimit:
-		stopLoading();
-		ShowLimitBox(controller, premium
-			? tr::lng_story_limit_count_premium(
-				lt_count,
-				rpl::single(float64(limits.storiesExpiringPremium())),
-				tr::rich)
-			: tr::lng_story_limit_count(
-				lt_count,
-				rpl::single(float64(limits.storiesExpiringDefault())),
-				tr::rich));
-		return;
 	case Type::WeeklyLimit:
-		stopLoading();
-		ShowLimitBox(controller, premium
-			? tr::lng_story_limit_weekly_premium(
-				lt_count,
-				rpl::single(float64(limits.storiesSentWeeklyPremium())),
-				tr::rich)
-			: tr::lng_story_limit_weekly(
-				lt_count,
-				rpl::single(float64(limits.storiesSentWeeklyDefault())),
-				tr::rich));
-		return;
 	case Type::MonthlyLimit:
 		stopLoading();
-		ShowLimitBox(controller, premium
-			? tr::lng_story_limit_monthly_premium(
-				lt_count,
-				rpl::single(float64(limits.storiesSentMonthlyPremium())),
-				tr::rich)
-			: tr::lng_story_limit_monthly(
-				lt_count,
-				rpl::single(float64(limits.storiesSentMonthlyDefault())),
-				tr::rich));
+		controller->show(
+			Box(
+				StoryPostingLimitBox,
+				controller,
+				result.type));
 		return;
 	case Type::LiveAlready:
 		stopLoading();

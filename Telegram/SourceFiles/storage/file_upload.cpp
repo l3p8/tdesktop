@@ -9,28 +9,28 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_editing.h"
 #include "api/api_send_progress.h"
+#include "apiwrap.h"
 #include "boxes/abstract_box.h"
 #include "boxes/premium_limits_box.h"
-#include "lang/lang_keys.h"
-#include "storage/localimageloader.h"
-#include "storage/file_download.h"
-#include "storage/storage_folder_archive.h"
+#include "core/application.h"
+#include "core/file_location.h"
+#include "core/mime_type.h"
 #include "data/data_document.h"
 #include "data/data_document_media.h"
 #include "data/data_photo.h"
 #include "data/data_session.h"
+#include "history/history.h"
+#include "history/history_item.h"
+#include "lang/lang_keys.h"
+#include "main/main_session.h"
+#include "media/media_video_encode.h"
+#include "storage/file_download.h"
+#include "storage/localimageloader.h"
+#include "storage/storage_account.h"
+#include "storage/storage_folder_archive.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/image/image_location_factory.h"
 #include "ui/toast/toast.h"
-#include "history/history_item.h"
-#include "history/history.h"
-#include "core/file_location.h"
-#include "core/application.h"
-#include "core/mime_type.h"
-#include "media/media_video_encode.h"
-#include "main/main_session.h"
-#include "storage/storage_account.h"
-#include "apiwrap.h"
 
 #include <QtCore/QFileInfo>
 
@@ -353,7 +353,9 @@ void Uploader::upload(
 		if (!preparing && !file->content.isEmpty()) {
 			document->setDataAndCache(file->content);
 		}
-		if (!preparing && !file->filepath.isEmpty()) {
+		if (!preparing
+			&& !file->filepath.isEmpty()
+			&& !file->temporaryPath) {
 			document->setLocation(Core::FileLocation(file->filepath));
 		} else if (!preparing
 			&& !file->content.isEmpty()
@@ -427,7 +429,6 @@ void Uploader::runTranscode(FullMsgId itemId) {
 	Assert(i != end(_queue));
 	auto &entry = *i;
 	const auto file = entry.file;
-	const auto source = file->videoSource;
 	const auto job = file->animationJob;
 	const auto archiveWork = (file->archive != nullptr);
 	const auto archiveLimit = session().premium()
@@ -474,7 +475,7 @@ void Uploader::runTranscode(FullMsgId itemId) {
 				result = Media::Encode::Run(std::move(fallback), nullptr);
 			}
 			bytes = std::move(result.bytes);
-		} else if (source) {
+		} else if (const auto &source = file->videoSource) {
 			path = Media::Encode::TranscodeVideo(*source, progress).path;
 		} else if (entries) {
 			const auto written = WriteArchive(
@@ -549,15 +550,32 @@ void Uploader::finishTranscode(
 	auto &entry = *i;
 	const auto file = entry.file;
 	const auto document = session().data().document(file->id);
-	auto size = int64();
+	const auto size = !path.isEmpty()
+		? int64(QFileInfo(path).size())
+		: int64(bytes.size());
+	if (file->videoSource && !path.isEmpty()) {
+		const auto limit = session().premium()
+			? kFileSizePremiumLimit
+			: kFileSizeLimit;
+		if (size > limit) {
+			QFile::remove(path);
+			Ui::show(
+				Box(
+					FileSizeLimitBox,
+					&session(),
+					uint64(size),
+					nullptr),
+				Ui::LayerOption::KeepOther);
+			failed(itemId);
+			return;
+		}
+	}
 	if (!path.isEmpty()) {
-		size = QFileInfo(path).size();
 		file->content = QByteArray();
 		file->filepath = path;
 		file->transcodedTempPath = path;
 		document->setLocation(Core::FileLocation(path));
 	} else if (!bytes.isEmpty()) {
-		size = int64(bytes.size());
 		file->content = bytes;
 		file->filepath = QString();
 		document->setDataAndCache(bytes);

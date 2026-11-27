@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unique_qptr.h"
 #include "data/data_message_reaction_id.h"
 #include "ui/effects/animations.h"
+#include "ui/emoji_config.h"
 
 namespace ChatHelpers {
 class TabbedPanel;
@@ -43,12 +44,20 @@ public:
 		not_null<Ui::RpWidget*> panelContainer,
 		std::shared_ptr<ChatHelpers::Show> show,
 		bool withAudio,
-		bool storyWidgets = false);
+		bool storyWidgets,
+		bool storyAreas);
 	~StickersPanelController();
 
 	[[nodiscard]] Main::Session &session() const;
 	[[nodiscard]] auto stickerChosen() const
 	-> rpl::producer<not_null<DocumentData*>>;
+	[[nodiscard]] auto gifChosen() const
+	-> rpl::producer<not_null<DocumentData*>>;
+	[[nodiscard]] rpl::producer<EmojiPtr> emojiChosen() const;
+	[[nodiscard]] rpl::producer<EmojiPtr> textEmojiChosen() const;
+	[[nodiscard]] Ui::RpWidget *textEmojiPanel() const;
+	void toggleTextEmojiPanel(QPoint globalAnchor);
+	void hideTextEmojiPanel();
 	[[nodiscard]] rpl::producer<> photoRequests() const;
 	[[nodiscard]] rpl::producer<> audioRequests() const;
 	[[nodiscard]] rpl::producer<> linkRequests() const;
@@ -76,6 +85,7 @@ private:
 	const not_null<Ui::RpWidget*> _panelContainer;
 	const std::shared_ptr<ChatHelpers::Show> _show;
 	const base::unique_qptr<ChatHelpers::TabbedPanel> _stickersPanel;
+	const base::unique_qptr<ChatHelpers::TabbedPanel> _textEmojiPanel;
 	std::unique_ptr<HistoryView::Reactions::Selector> _reactionsSelector;
 	int _reactionsWidth = 0;
 	int _reactionsCategoriesTop = 0;

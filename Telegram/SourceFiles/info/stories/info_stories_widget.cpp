@@ -12,15 +12,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/stories/info_stories_inner_widget.h"
 #include "info/info_controller.h"
 #include "info/info_memento.h"
+#include "lang/lang_keys.h"
 #include "media/stories/media_stories_post.h"
 #include "ui/text/text_utilities.h"
-#include "ui/painter.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/scroll_area.h"
-#include "ui/wrap/slide_wrap.h"
 #include "ui/widgets/shadow.h"
-#include "lang/lang_keys.h"
+#include "ui/wrap/slide_wrap.h"
+#include "ui/painter.h"
 #include "ui/ui_utility.h"
+
 #include "styles/style_basic.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
@@ -256,11 +257,12 @@ void Widget::restoreState(not_null<Memento*> memento) {
 void Widget::refreshBottom() {
 	const auto albumId = _albumId.current();
 	const auto peer = controller()->storiesPeer();
-	const auto withButton = (albumId == Data::kStoriesAlbumIdArchive)
-		? false
-		: (albumId == Data::kStoriesAlbumIdSaved)
-		? (_inner->myProfile() && ::Media::Stories::CanPostStory(peer))
-		: (peer->canEditStories() && !_emptyAlbumShown.current());
+	const auto withButton = (albumId != Data::kStoriesAlbumIdArchive)
+		&& !_emptyAlbumShown.current()
+		&& ((albumId == Data::kStoriesAlbumIdSaved)
+			? (_inner->myProfile()
+				&& ::Media::Stories::CanPostStory(peer))
+			: peer->canEditStories());
 	const auto wasBottom = _pinnedToBottom ? _pinnedToBottom->height() : 0;
 	delete _pinnedToBottom.data();
 	if (!withButton) {

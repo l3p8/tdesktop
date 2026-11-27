@@ -7,25 +7,26 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "editor/video/video_editor.h"
 
+#include "api/api_stories.h"
 #include "base/event_filter.h"
 #include "base/timer.h"
-#include "api/api_stories.h"
-#include "editor/editor_caption_bar.h"
-#include "editor/editor_crop.h"
 #include "editor/video/video_quality_slider.h"
 #include "editor/video/video_segment_player.h"
 #include "editor/video/video_timeline.h"
 #include "editor/video/video_timeline_seeker.h"
+#include "editor/editor_caption_bar.h"
+#include "editor/editor_crop.h"
 #include "lang/lang_keys.h"
 #include "media/view/media_view_pip.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/layers/layer_widget.h"
+#include "ui/text/format_values.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/tooltip.h"
 #include "ui/painter.h"
-#include "ui/text/format_values.h"
 #include "ui/ui_utility.h"
+
 #include "styles/style_editor.h"
 #include "styles/style_media_view.h"
 
@@ -206,6 +207,7 @@ VideoEditor::VideoEditor(
 : RpWidget(parent)
 , _path(descriptor.path)
 , _content(descriptor.content)
+, _preview(std::move(descriptor.preview))
 , _dimensions(descriptor.dimensions)
 , _duration(std::max(descriptor.duration, crl::time(1)))
 , _data(descriptor.data)
@@ -284,6 +286,7 @@ void VideoEditor::setupTimeline() {
 		VideoTimelineDescriptor{
 			.path = _path,
 			.content = _content,
+			.preview = _preview,
 			.dimensions = _dimensions,
 			.duration = _duration,
 			.maxDuration = _data.maxDuration,
@@ -662,7 +665,12 @@ void VideoEditor::setupStreaming() {
 		}
 	}, lifetime());
 
+	_player->setPaused(true);
 	_player->start();
+}
+
+void VideoEditor::startPlayback() {
+	_player->setPaused(_userPaused);
 }
 
 void VideoEditor::setupTapToPause() {
@@ -991,7 +999,8 @@ void VideoEditor::paint(QPainter &p) {
 		return;
 	}
 	const auto frame = _player->frame(frameRequestSize());
-	if (frame.isNull()) {
+	const auto &image = frame.isNull() ? _preview : frame;
+	if (image.isNull()) {
 		return;
 	}
 	auto hq = PainterHighQualityEnabler(p);
@@ -1000,7 +1009,7 @@ void VideoEditor::paint(QPainter &p) {
 		p.setClipRect(_canvasRect);
 	}
 	p.setTransform(_frameMatrix);
-	p.drawImage(_frameRect, frame);
+	p.drawImage(_frameRect, image);
 	p.resetTransform();
 	if (_data.canvas) {
 		p.setClipping(false);

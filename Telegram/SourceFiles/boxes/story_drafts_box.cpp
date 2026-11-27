@@ -16,16 +16,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "media/stories/media_stories_post.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/image/image_prepare.h"
 #include "ui/layers/generic_box.h"
-#include "ui/widgets/labels.h"
-#include "ui/painter.h"
 #include "ui/text/text.h"
+#include "ui/widgets/buttons.h"
+#include "ui/widgets/labels.h"
+#include "ui/wrap/vertical_layout.h"
+#include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "ui/vertical_list.h"
-#include "ui/widgets/buttons.h"
-#include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
+
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_layers.h"
@@ -174,6 +176,20 @@ void StoryDraftsBox(
 	const auto content = box->addRow(
 		object_ptr<Ui::VerticalLayout>(box),
 		QMargins());
+	const auto confirmRemoval = [=](uint64 id) {
+		box->uiShow()->show(
+			Ui::MakeConfirmBox({
+				.text = tr::lng_story_delete_draft_sure(),
+				.confirmed = crl::guard(
+					box,
+					[=](Fn<void()> close) {
+						drafts->remove(id);
+						close();
+					}),
+				.confirmText = tr::lng_story_delete_draft(),
+				.confirmStyle = &st::attentionBoxButton,
+			}));
+	};
 	const auto rebuild = [=] {
 		content->clear();
 		if (choosing) {
@@ -196,7 +212,7 @@ void StoryDraftsBox(
 				Media::Stories::PostStoryDraft(controller, id);
 			});
 			row->removeRequests() | rpl::on_next([=] {
-				drafts->remove(id);
+				confirmRemoval(id);
 			}, row->lifetime());
 			++count;
 		}

@@ -7,34 +7,38 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/controls/history_view_compose_controls.h"
 
-#include "history/view/controls/history_view_bot_menu_button.h"
-
+#include "api/api_chat_participants.h"
+#include "api/api_compose_with_ai.h"
+#include "api/api_forward_reply.h"
+#include "api/api_global_privacy.h"
+#include "apiwrap.h"
+#include "base/platform/base_platform_info.h"
+#include "base/qt/qt_key_modifiers.h"
 #include "base/call_delayed.h"
 #include "base/event_filter.h"
 #include "base/options.h"
-#include "base/platform/base_platform_info.h"
-#include "base/qt/qt_key_modifiers.h"
 #include "base/qt_signal_producer.h"
 #include "base/random.h"
 #include "base/timer_rpl.h"
 #include "base/unixtime.h"
 #include "base/weak_ptr.h"
-#include "boxes/star_gift_box.h"
 #include "boxes/compose_ai_box.h"
 #include "boxes/edit_caption_box.h"
+#include "boxes/message_video_edit.h"
 #include "boxes/premium_preview_box.h"
 #include "boxes/send_files_box.h"
 #include "boxes/send_gif_with_caption_box.h"
+#include "boxes/star_gift_box.h"
 #include "calls/group/ui/calls_group_stars_coloring.h"
 #include "calls/group/calls_group_stars_box.h"
 #include "chat_helpers/compose/compose_show.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
+#include "chat_helpers/field_autocomplete.h"
 #include "chat_helpers/message_field.h"
 #include "chat_helpers/rich_paste_toast.h"
 #include "chat_helpers/tabbed_panel.h"
 #include "chat_helpers/tabbed_section.h"
 #include "chat_helpers/tabbed_selector.h"
-#include "chat_helpers/field_autocomplete.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
 #include "core/core_settings.h"
@@ -42,100 +46,97 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/ui_integration.h"
 #include "data/components/ephemeral_messages.h"
 #include "data/notify/data_notify_settings.h"
+#include "data/stickers/data_custom_emoji.h"
+#include "data/stickers/data_stickers.h"
 #include "data/data_birthday.h"
 #include "data/data_changes.h"
-#include "data/data_compose_stash.h"
-#include "data/data_drafts.h"
-#include "data/data_group_call.h"
-#include "data/data_messages.h"
-#include "data/data_message_reactions.h"
-#include "data/data_saved_sublist.h"
-#include "data/data_session.h"
-#include "data/data_user.h"
-#include "data/data_chat.h"
 #include "data/data_channel.h"
+#include "data/data_chat.h"
+#include "data/data_compose_stash.h"
+#include "data/data_document.h"
+#include "data/data_drafts.h"
 #include "data/data_file_origin.h"
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
+#include "data/data_group_call.h"
+#include "data/data_message_reactions.h"
+#include "data/data_messages.h"
 #include "data/data_peer_values.h"
-#include "data/data_document.h"
 #include "data/data_photo.h"
 #include "data/data_photo_media.h"
 #include "data/data_poll.h"
 #include "data/data_premium_limits.h" // Data::PremiumLimits.
-#include "data/stickers/data_stickers.h"
-#include "data/stickers/data_custom_emoji.h"
+#include "data/data_saved_sublist.h"
+#include "data/data_session.h"
+#include "data/data_user.h"
 #include "data/data_web_page.h"
-#include "storage/storage_account.h"
-#include "api/api_forward_reply.h"
-#include "api/api_global_privacy.h"
-#include "apiwrap.h"
-#include "api/api_chat_participants.h"
-#include "api/api_compose_with_ai.h"
-#include "ui/boxes/confirm_box.h"
-#include "ui/click_handler.h"
-#include "ui/color_int_conversion.h"
-#include "ui/painter.h"
-#include "ui/power_saving.h"
-#include "history/history.h"
-#include "history/history_item.h"
-#include "history/history_streamed_drafts.h"
-#include "history/history_item_components.h"
-#include "history/history_item_helpers.h"
+#include "history/view/controls/history_view_bot_menu_button.h"
+#include "history/view/controls/history_view_bot_menu_hold.h"
 #include "history/view/controls/history_view_characters_limit.h"
 #include "history/view/controls/history_view_compose_ai_button.h"
 #include "history/view/controls/history_view_compose_ai_tooltip.h"
-#include "history/view/controls/history_view_bot_menu_hold.h"
 #include "history/view/controls/history_view_compose_media_edit_manager.h"
 #include "history/view/controls/history_view_compose_stash_hint.h"
+#include "history/view/controls/history_view_draft_options.h"
 #include "history/view/controls/history_view_forward_panel.h"
 #include "history/view/controls/history_view_rich_draft_preview.h"
-#include "history/view/controls/history_view_draft_options.h"
 #include "history/view/controls/history_view_suggest_options.h"
 #include "history/view/controls/history_view_ttl_button.h"
 #include "history/view/controls/history_view_voice_record_bar.h"
 #include "history/view/controls/history_view_webpage_processor.h"
 #include "history/view/history_view_reply.h"
 #include "history/view/history_view_schedule_box.h"
-#include "inline_bots/bot_attach_web_view.h"
-#include "inline_bots/inline_results_widget.h"
-#include "inline_bots/inline_bot_result.h"
+#include "history/history.h"
+#include "history/history_item.h"
+#include "history/history_item_components.h"
+#include "history/history_item_helpers.h"
+#include "history/history_streamed_drafts.h"
 #include "info/profile/info_profile_values.h"
+#include "inline_bots/bot_attach_web_view.h"
+#include "inline_bots/inline_bot_result.h"
+#include "inline_bots/inline_results_widget.h"
 #include "iv/editor/iv_editor_session.h"
 #include "iv/iv_rich_page.h"
 #include "lang/lang_keys.h"
+#include "main/session/send_as_peers.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
-#include "main/session/send_as_peers.h"
-#include "media/audio/media_audio_capture.h"
+#include "mainwindow.h"
 #include "media/audio/media_audio.h"
-#include "mtproto/mtproto_config.h"
+#include "media/audio/media_audio_capture.h"
 #include "menu/menu_send.h"
+#include "mtproto/mtproto_config.h"
 #include "settings/sections/settings_premium.h"
+#include "storage/storage_account.h"
 #include "support/support_common.h"
 #include "support/support_helper.h"
-#include "ui/item_text_options.h"
-#include "ui/text/text_options.h"
-#include "ui/text/text_utilities.h"
-#include "ui/ui_utility.h"
-#include "ui/widgets/fields/input_field.h"
-#include "ui/widgets/dropdown_menu.h"
-#include "ui/text/format_values.h"
+#include "ui/boxes/confirm_box.h"
+#include "ui/chat/choose_send_as.h"
 #include "ui/controls/compose_ai_button_factory.h"
 #include "ui/controls/emoji_button.h"
-#include "ui/controls/send_button.h"
 #include "ui/controls/send_as_button.h"
+#include "ui/controls/send_button.h"
 #include "ui/controls/silent_toggle.h"
-#include "ui/chat/choose_send_as.h"
-#include "ui/effects/spoiler_mess.h"
 #include "ui/effects/reaction_fly_animation.h"
+#include "ui/effects/spoiler_mess.h"
+#include "ui/text/format_values.h"
+#include "ui/text/text_options.h"
+#include "ui/text/text_utilities.h"
+#include "ui/widgets/fields/input_field.h"
+#include "ui/widgets/dropdown_menu.h"
+#include "ui/click_handler.h"
+#include "ui/color_int_conversion.h"
+#include "ui/item_text_options.h"
+#include "ui/painter.h"
+#include "ui/power_saving.h"
+#include "ui/ui_utility.h"
 #include "webrtc/webrtc_environment.h"
 #include "window/window_adaptive.h"
 #include "window/window_columns.h"
 #include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
-#include "mainwindow.h"
+
 #include "styles/style_calls.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
@@ -211,7 +212,7 @@ public:
 	void editMessage(
 		FullMsgId id,
 		SuggestOptions suggest,
-		bool photoEditAllowed = false);
+		bool previewEditAllowed = false);
 	void replyToMessage(FullReplyTo id);
 	void replyToMessageExternal(FullReplyTo id);
 	void updateForwarding(
@@ -241,7 +242,7 @@ public:
 	[[nodiscard]] FullMsgId editMsgId() const;
 	[[nodiscard]] rpl::producer<FullMsgId> editMsgIdValue() const;
 	[[nodiscard]] rpl::producer<FullReplyTo> jumpToItemRequests() const;
-	[[nodiscard]] rpl::producer<> editPhotoRequests() const;
+	[[nodiscard]] rpl::producer<> editMediaRequests() const;
 	[[nodiscard]] rpl::producer<> editOptionsRequests() const;
 	[[nodiscard]] MessageToEdit queryToEdit();
 	[[nodiscard]] SendMenu::Details saveMenuDetails(bool hasSendText) const;
@@ -320,10 +321,10 @@ private:
 	Ui::Text::String _shownMessageName;
 	Ui::Text::String _shownMessageText;
 	std::unique_ptr<Ui::SpoilerAnimation> _shownPreviewSpoiler;
-	Ui::Animations::Simple _inPhotoEditOver;
+	Ui::Animations::Simple _inMediaEditOver;
 	bool _shownMessageHasPreview : 1 = false;
-	bool _inPhotoEdit : 1 = false;
-	bool _photoEditAllowed : 1 = false;
+	bool _inMediaEdit : 1 = false;
+	bool _previewEditAllowed : 1 = false;
 	bool _repaintScheduled : 1 = false;
 	bool _inClickable : 1 = false;
 
@@ -340,7 +341,7 @@ private:
 	rpl::event_stream<bool> _visibleChanged;
 	rpl::event_stream<FullReplyTo> _jumpToItemRequests;
 	rpl::event_stream<> _editOptionsRequests;
-	rpl::event_stream<> _editPhotoRequests;
+	rpl::event_stream<> _editMediaRequests;
 
 };
 
@@ -500,19 +501,21 @@ void FieldHeader::init() {
 				|| displayedReplyingToMessage()
 				|| _preview.parsed);
 	}) | rpl::on_next([=](not_null<QEvent*> event) {
-		const auto updateOver = [&](bool inClickable, bool inPhotoEdit) {
+		const auto updateOver = [&](
+			bool inClickable,
+			bool inMediaEdit) {
 			if (_inClickable != inClickable) {
 				_inClickable = inClickable;
 				setCursor(_inClickable
 					? style::cur_pointer
 					: style::cur_default);
 			}
-			if (_inPhotoEdit != inPhotoEdit) {
-				_inPhotoEdit = inPhotoEdit;
-				_inPhotoEditOver.start(
+			if (_inMediaEdit != inMediaEdit) {
+				_inMediaEdit = inMediaEdit;
+				_inMediaEditOver.start(
 					[=] { update(); },
-					_inPhotoEdit ? 0. : 1.,
-					_inPhotoEdit ? 1. : 0.,
+					_inMediaEdit ? 0. : 1.,
+					_inMediaEdit ? 1. : 0.,
 					st::defaultMessageBar.duration);
 			}
 		};
@@ -524,19 +527,19 @@ void FieldHeader::init() {
 		const auto e = static_cast<QMouseEvent*>(event.get());
 		const auto pos = e->pos();
 		const auto inPreviewRect = _clickableRect.contains(pos);
-		const auto inPhotoEdit = _shownMessageHasPreview
-			&& _photoEditAllowed
+		const auto inMediaEdit = _shownMessageHasPreview
+			&& _previewEditAllowed
 			&& _shownMessagePreviewRect.contains(pos);
 
 		if (type == QEvent::MouseMove) {
-			updateOver(inPreviewRect, inPhotoEdit);
+			updateOver(inPreviewRect, inMediaEdit);
 			return;
 		}
 		const auto isLeftButton = (e->button() == Qt::LeftButton);
 		if (type == QEvent::MouseButtonPress
 			|| type == QEvent::MouseButtonDblClick) {
-			if (isLeftButton && inPhotoEdit) {
-				_editPhotoRequests.fire({});
+			if (isLeftButton && inMediaEdit) {
+				_editMediaRequests.fire({});
 			} else if (isLeftButton && inPreviewRect) {
 				const auto reply = displayedReplyingToMessage();
 				if (_preview.parsed) {
@@ -780,8 +783,8 @@ void FieldHeader::paintEditOrReplyToMessage(Painter &p) {
 	const auto textLeft = replySkip + previewSkip;
 	const auto textAvailableWidth = availableWidth - previewSkip;
 	if (preview) {
-		const auto overEdit = _photoEditAllowed
-			? _inPhotoEditOver.value(_inPhotoEdit ? 1. : 0.)
+		const auto overEdit = _previewEditAllowed
+			? _inMediaEditOver.value(_inMediaEdit ? 1. : 0.)
 			: 0.;
 		const auto to = QRect(
 			replySkip,
@@ -804,12 +807,7 @@ void FieldHeader::paintEditOrReplyToMessage(Painter &p) {
 				Ui::DefaultImageSpoiler().frame(
 					_shownPreviewSpoiler->index(crl::now(), p.inactive())));
 		}
-		if (overEdit > 0.) {
-			p.setOpacity(overEdit);
-			p.fillRect(to, st::historyEditMediaBg);
-			st::historyEditMedia.paintInCenter(p, to);
-			p.setOpacity(1.);
-		}
+		MediaEditManager::PaintPreviewHover(p, to, overEdit);
 		_mediaEditManager.paintCoverUpload(p, to);
 	}
 
@@ -1000,8 +998,8 @@ void FieldHeader::updateControlsGeometry(QSize size) {
 void FieldHeader::editMessage(
 		FullMsgId id,
 		SuggestOptions suggest,
-		bool photoEditAllowed) {
-	_photoEditAllowed = photoEditAllowed;
+		bool previewEditAllowed) {
+	_previewEditAllowed = previewEditAllowed;
 	_editMsgId = id;
 	if (!id) {
 		_mediaEditManager.cancel();
@@ -1011,9 +1009,9 @@ void FieldHeader::editMessage(
 	} else {
 		_mediaEditManager.cancel();
 	}
-	if (!photoEditAllowed) {
-		_inPhotoEdit = false;
-		_inPhotoEditOver.stop();
+	if (!previewEditAllowed) {
+		_inMediaEdit = false;
+		_inMediaEditOver.stop();
 	}
 	if (id && suggest) {
 		applySuggestOptions(suggest, SuggestMode::Change);
@@ -1076,8 +1074,8 @@ rpl::producer<FullReplyTo> FieldHeader::jumpToItemRequests() const {
 	return _jumpToItemRequests.events();
 }
 
-rpl::producer<> FieldHeader::editPhotoRequests() const {
-	return _editPhotoRequests.events();
+rpl::producer<> FieldHeader::editMediaRequests() const {
+	return _editMediaRequests.events();
 }
 
 rpl::producer<> FieldHeader::editOptionsRequests() const {
@@ -1468,6 +1466,9 @@ ComposeControls::~ComposeControls() {
 	saveFieldToHistoryLocalDraft();
 	unregisterDraftSources();
 	setTabbedPanel(nullptr);
+	if (const auto menu = base::take(_attachBotsMenu)) {
+		menu->hideFast();
+	}
 	session().api().request(_inlineBotResolveRequestId).cancel();
 }
 
@@ -2945,10 +2946,10 @@ void ComposeControls::init() {
 		updateFieldPlaceholder();
 	}, _wrap->lifetime());
 
-	_header->editPhotoRequests(
+	_header->editMediaRequests(
 	) | rpl::on_next([=] {
 		const auto queryToEdit = _header->queryToEdit();
-		EditCaptionBox::StartPhotoEdit(
+		EditCaptionBox::StartMediaEdit(
 			_regularWindow,
 			_photoEditMedia,
 			_editingId,
@@ -3962,10 +3963,12 @@ void ComposeControls::applyDraft(FieldHistoryAction fieldHistoryAction) {
 						Data::PhotoSize::Large,
 						item->fullId());
 				}
+				const auto canEditVideo = _regularWindow
+					&& FindEditableMessageVideo(item);
 				_header->editMessage(
 					editingId,
 					editingSuggest,
-					_photoEditMedia != nullptr);
+					_photoEditMedia || canEditVideo);
 				if (_preview) {
 					_preview->setDisabled(media && !media->webpage());
 				}
@@ -5766,7 +5769,9 @@ bool ComposeControls::updateSendAsButton(
 }
 
 void ComposeControls::updateAttachBotsMenu() {
-	_attachBotsMenu = nullptr;
+	if (const auto menu = base::take(_attachBotsMenu)) {
+		menu->hideFast();
+	}
 	if (!_features.attachBotsMenu
 		|| !_features.attachments
 		|| !_history
@@ -6183,6 +6188,9 @@ void ComposeControls::updateForwarding() {
 bool ComposeControls::handleCancelRequest() {
 	if (_isInlineBot) {
 		cancelInlineBot();
+		return true;
+	} else if (_attachBotsMenu && !_attachBotsMenu->isHidden()) {
+		_attachBotsMenu->hideAnimated();
 		return true;
 	} else if (_autocomplete && !_autocomplete->isHidden()) {
 		_autocomplete->hideAnimated();

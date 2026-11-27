@@ -36,8 +36,6 @@ include(cmake/lib_tgcalls.cmake)
 include(cmake/lib_prisma.cmake)
 include(cmake/lib_fido2.cmake)
 include(cmake/lib_zxcvbn.cmake)
-include(cmake/lib_litehtml.cmake)
-include(cmake/lib_quickjs.cmake)
 include(cmake/lib_widget_renderer.cmake)
 include(cmake/lib_widget_sandbox.cmake)
 include(cmake/td_export.cmake)
@@ -76,8 +74,11 @@ if (DESKTOP_APP_TEST_APPS OR TDESKTOP_BUILD_UPDATE_TESTS)
         endif()
     endif()
 endif()
+include(cmake/test_core_settings.cmake)
+include(cmake/test_export_formats.cmake)
 include(cmake/test_iv_editor_state.cmake)
 include(cmake/test_iv_editor_table_grid.cmake)
+include(cmake/test_text_contracts.cmake)
 include(cmake/test_wallet_card_tint.cmake)
 include(cmake/test_wallet_phrase_shares.cmake)
 
@@ -86,10 +87,8 @@ set_target_properties(Telegram PROPERTIES AUTOMOC ON)
 target_link_libraries(Telegram
 PRIVATE
     tdesktop::lib_fido2
-    tdesktop::lib_litehtml
-    tdesktop::lib_quickjs
-    tdesktop::lib_widget_renderer
-    tdesktop::lib_widget_sandbox
+    tdesktop::lib_widget_renderer_platform
+    tdesktop::lib_widget_sandbox_host
     tdesktop::lib_tgcalls
     tdesktop::td_export
     tdesktop::td_gram
@@ -146,6 +145,10 @@ PRIVATE
     api/api_bot.h
     api/api_bot_info.cpp
     api/api_bot_info.h
+    api/api_bot_media_preview_upload.cpp
+    api/api_bot_media_preview_upload.h
+    api/api_bot_media_previews.cpp
+    api/api_bot_media_previews.h
     api/api_chat_filters.cpp
     api/api_chat_filters.h
     api/api_chat_filters_remove_manager.cpp
@@ -324,6 +327,8 @@ PRIVATE
     boxes/peers/edit_peer_type_box.h
     boxes/peers/edit_peer_usernames_list.cpp
     boxes/peers/edit_peer_usernames_list.h
+    boxes/peers/invite_to_bot_box.cpp
+    boxes/peers/invite_to_bot_box.h
     boxes/peers/peer_short_info_box.cpp
     boxes/peers/peer_short_info_box.h
     boxes/peers/prepare_short_info_box.cpp
@@ -372,6 +377,8 @@ PRIVATE
     boxes/edit_todo_list_box.h
     boxes/gift_credits_box.cpp
     boxes/gift_credits_box.h
+    boxes/gift_onchain_offer_box.cpp
+    boxes/gift_onchain_offer_box.h
     boxes/gift_premium_box.cpp
     boxes/gift_premium_box.h
     boxes/keys_legend.cpp
@@ -380,6 +387,8 @@ PRIVATE
     boxes/language_box.h
     boxes/max_invite_box.cpp
     boxes/max_invite_box.h
+    boxes/message_video_edit.cpp
+    boxes/message_video_edit.h
     boxes/moderate_messages_box.cpp
     boxes/moderate_messages_box.h
     boxes/music_attach_box.cpp
@@ -404,6 +413,8 @@ PRIVATE
     boxes/pin_messages_box.h
     boxes/premium_limits_box.cpp
     boxes/premium_limits_box.h
+    boxes/premium_story_limits_box.cpp
+    boxes/premium_story_limits_box.h
     boxes/premium_preview_box.cpp
     boxes/premium_preview_box.h
     boxes/reactions_settings_box.cpp
@@ -444,6 +455,18 @@ PRIVATE
     boxes/star_gift_craft_animation.h
     boxes/star_gift_craft_box.cpp
     boxes/star_gift_craft_box.h
+    boxes/star_gift_onchain_buy_box.cpp
+    boxes/star_gift_onchain_buy_box.h
+    boxes/star_gift_onchain_offer_buy_box.cpp
+    boxes/star_gift_onchain_offer_buy_box.h
+    boxes/star_gift_onchain_offer_confirm_box.cpp
+    boxes/star_gift_onchain_offer_confirm_box.h
+    boxes/star_gift_onchain_sale_box.cpp
+    boxes/star_gift_onchain_sale_box.h
+    boxes/star_gift_onchain_signing.cpp
+    boxes/star_gift_onchain_signing.h
+    boxes/star_gift_onchain_withdraw_box.cpp
+    boxes/star_gift_onchain_withdraw_box.h
     boxes/star_gift_preview_box.cpp
     boxes/star_gift_preview_box.h
     boxes/star_gift_resale_box.cpp
@@ -622,6 +645,7 @@ PRIVATE
     core/crash_report_window.h
     core/crash_reports.cpp
     core/crash_reports.h
+    core/credits_amount.cpp
     core/credits_amount.h
     core/deadlock_detector.h
     core/deep_links/deep_links_chats.cpp
@@ -956,6 +980,8 @@ PRIVATE
     editor/editor_audio_timeline.h
     editor/editor_caption_bar.cpp
     editor/editor_caption_bar.h
+    editor/editor_gif.cpp
+    editor/editor_gif.h
     editor/editor_link_box.cpp
     editor/editor_link_box.h
     editor/editor_message_render.cpp
@@ -1176,7 +1202,6 @@ PRIVATE
     history/view/history_view_chat_preview.h
     history/view/history_view_chat_section.cpp
     history/view/history_view_chat_section.h
-    history/view/history_view_chat_section_monoforum.cpp
     history/view/history_view_contact_status.cpp
     history/view/history_view_contact_status.h
     history/view/history_view_context_menu.cpp
@@ -1278,8 +1303,12 @@ PRIVATE
     history/history.h
     history/history_drag_area.cpp
     history/history_drag_area.h
+    history/history_gift_onchain_offer.cpp
+    history/history_gift_onchain_offer.h
     history/history_item.cpp
     history/history_item.h
+    history/history_item_bot_invite.cpp
+    history/history_item_bot_invite.h
     history/history_item_components.cpp
     history/history_item_components.h
     history/history_item_edition.cpp
@@ -1298,6 +1327,8 @@ PRIVATE
     history/history_location_manager.h
     history/history_streamed_drafts.cpp
     history/history_streamed_drafts.h
+    history/history_top_message_hint.cpp
+    history/history_top_message_hint.h
     history/history_translation.cpp
     history/history_translation.h
     history/history_unread_things.cpp
@@ -1390,6 +1421,10 @@ PRIVATE
     info/profile/info_profile_actions.h
     info/profile/info_profile_badge.cpp
     info/profile/info_profile_badge.h
+    info/profile/info_profile_bot_media_previews.cpp
+    info/profile/info_profile_bot_media_previews.h
+    info/profile/info_profile_bot_preview_provider.cpp
+    info/profile/info_profile_bot_preview_provider.h
     info/profile/info_profile_balance_pill.cpp
     info/profile/info_profile_balance_pill.h
     info/profile/info_profile_birthday_effect.cpp
@@ -1424,6 +1459,7 @@ PRIVATE
     info/profile/info_profile_status_label.h
     info/profile/info_profile_top_bar.cpp
     info/profile/info_profile_top_bar.h
+    info/profile/info_profile_top_bar_my_profile.cpp
     info/profile/info_profile_values.cpp
     info/profile/info_profile_values.h
     info/profile/info_profile_widget.cpp
@@ -1647,6 +1683,8 @@ PRIVATE
     media/stories/media_stories_delegate.h
     media/stories/media_stories_header.cpp
     media/stories/media_stories_header.h
+    media/stories/media_stories_music.cpp
+    media/stories/media_stories_music.h
     media/stories/media_stories_post.cpp
     media/stories/media_stories_post.h
     media/stories/media_stories_reactions.cpp
@@ -1698,12 +1736,14 @@ PRIVATE
     media/media_video_frames.h
     media/view/media_view_group_thumbs.cpp
     media/view/media_view_group_thumbs.h
+    media/view/media_view_story_caption.cpp
     media/view/media_view_open_common.cpp
     media/view/media_view_open_common.h
     media/view/media_view_overlay_opengl.cpp
     media/view/media_view_overlay_opengl.h
     media/view/media_view_overlay_raster.cpp
     media/view/media_view_overlay_raster.h
+    media/view/media_view_overlay_restart.cpp
     media/view/media_view_overlay_rhi.cpp
     media/view/media_view_overlay_rhi.h
     media/view/media_view_metal_texture.h
@@ -1791,6 +1831,7 @@ PRIVATE
     overview/overview_layout.cpp
     overview/overview_layout.h
     overview/overview_layout_delegate.h
+    overview/overview_voice_search.cpp
     poll/poll_link_box.cpp
     poll/poll_link_box.h
     poll/poll_link_thumbnail.cpp
@@ -2141,6 +2182,8 @@ PRIVATE
     test/test_agent.h
     test/test_animation_clock.cpp
     test/test_animation_clock.h
+    test/test_application_state.cpp
+    test/test_application_state.h
     test/test_box_button.cpp
     test/test_box_button.h
     test/test_capture.cpp
@@ -2218,6 +2261,8 @@ PRIVATE
     test/test_palette.h
     test/test_panel.cpp
     test/test_panel.h
+    test/test_popup_hold.cpp
+    test/test_popup_hold.h
     test/test_post_paint.cpp
     test/test_post_paint.h
     test/test_press_origin.cpp
@@ -2278,12 +2323,12 @@ PRIVATE
     test/test_widget_conformance_bridge.h
     test/test_widget_conformance_context.cpp
     test/test_widget_conformance_context.h
+    test/test_widget_conformance_death.cpp
+    test/test_widget_conformance_death.h
     test/test_widget_conformance_hosts.cpp
     test/test_widget_conformance_hosts.h
     test/test_widget_conformance_input.cpp
     test/test_widget_conformance_input.h
-    test/test_widget_conformance_paint_policy.cpp
-    test/test_widget_conformance_paint_policy.h
     test/test_widget_conformance_pictures.cpp
     test/test_widget_conformance_pictures.h
     test/test_widget_conformance_state.h
@@ -2299,10 +2344,10 @@ PRIVATE
     test/test_widget_ops.cpp
     test/test_widget_ops.h
     test/test_widget_ops_check.cpp
+    test/test_widget_ops_deaths.cpp
+    test/test_widget_ops_exchanges.cpp
     test/test_widget_ops_hosted.cpp
     test/test_widget_ops_internal.h
-    test/test_widget_paint_policy.cpp
-    test/test_widget_paint_policy.h
     test/test_widget_renderer_forward.h
     test/test_widget_stress.cpp
     test/test_widget_stress.h
@@ -2318,8 +2363,6 @@ PRIVATE
     tgw/tgw_bridge.h
     tgw/tgw_canvas.cpp
     tgw/tgw_canvas.h
-    tgw/tgw_cursor.cpp
-    tgw/tgw_cursor.h
     tgw/tgw_emoji.cpp
     tgw/tgw_emoji.h
     tgw/tgw_emoji_images.cpp
@@ -2478,6 +2521,8 @@ PRIVATE
     ui/filter_icons.h
     ui/filter_icon_panel.cpp
     ui/filter_icon_panel.h
+    ui/filter_title_icon.cpp
+    ui/filter_title_icon.h
     ui/item_text_options.cpp
     ui/item_text_options.h
     ui/resize_area.h
@@ -2553,6 +2598,8 @@ PRIVATE
     wallet/wallet_key_protection.h
     wallet/wallet_move_to_gifts.cpp
     wallet/wallet_move_to_gifts.h
+    wallet/wallet_onchain_gift_presentation.cpp
+    wallet/wallet_onchain_gift_presentation.h
     wallet/wallet_onramp.cpp
     wallet/wallet_onramp.h
     wallet/wallet_own_card.cpp
@@ -2575,6 +2622,10 @@ PRIVATE
     wallet/wallet_session_deposit.h
     wallet/wallet_session_gift_moves.cpp
     wallet/wallet_session_gift_moves.h
+    wallet/wallet_session_onchain_gifts.cpp
+    wallet/wallet_session_onchain_gifts.h
+    wallet/wallet_session_served.cpp
+    wallet/wallet_session_served.h
     wallet/wallet_session_waits.cpp
     wallet/wallet_session_waits.h
     wallet/wallet_stream.cpp

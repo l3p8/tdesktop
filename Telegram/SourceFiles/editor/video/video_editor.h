@@ -10,8 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/unique_qptr.h"
 #include "base/weak_ptr.h"
-#include "ui/effects/animations.h"
 #include "editor/video/video_editor_common.h"
+#include "ui/effects/animations.h"
 #include "ui/rp_widget.h"
 
 namespace Ui {
@@ -34,6 +34,7 @@ class VideoQualitySlider;
 struct VideoEditorDescriptor {
 	QString path;
 	QByteArray content;
+	QImage preview;
 	QSize dimensions;
 	crl::time duration = 0;
 	VideoEditorData data;
@@ -49,6 +50,8 @@ public:
 		not_null<QWidget*> parent,
 		VideoEditorDescriptor descriptor);
 	~VideoEditor();
+
+	void startPlayback();
 
 	[[nodiscard]] rpl::producer<VideoModifications> doneRequests() const {
 		return _done.events();
@@ -105,6 +108,7 @@ private:
 
 	const QString _path;
 	const QByteArray _content;
+	const QImage _preview;
 	const QSize _dimensions;
 	const crl::time _duration = 0;
 	const VideoEditorData _data;

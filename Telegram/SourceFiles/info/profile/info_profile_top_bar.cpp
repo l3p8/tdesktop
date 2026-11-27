@@ -14,45 +14,45 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "base/call_delayed.h"
 #include "base/event_filter.h"
-#include "base/timer_rpl.h"
 #include "base/timer.h"
+#include "base/timer_rpl.h"
 #include "base/unixtime.h"
-#include "boxes/peers/edit_peer_info_box.h" // EditPeerInfoBox::Available.
 #include "boxes/peers/edit_forum_topic_box.h"
+#include "boxes/peers/edit_peer_info_box.h" // EditPeerInfoBox::Available.
 #include "boxes/peers/manage_community_box.h"
 #include "boxes/moderate_messages_box.h"
 #include "boxes/report_messages_box.h"
 #include "boxes/star_gift_box.h"
+#include "boxes/sticker_set_box.h"
 #include "calls/calls_instance.h"
 #include "chat_helpers/stickers_lottie.h"
 #include "core/application.h"
 #include "core/shortcuts.h"
 #include "data/components/recent_shared_media_gifts.h"
+#include "data/stickers/data_custom_emoji.h"
 #include "data/data_birthday.h"
 #include "data/data_changes.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
-#include "data/data_document_media.h"
 #include "data/data_document.h"
+#include "data/data_document_media.h"
 #include "data/data_emoji_statuses.h"
-#include "data/data_forum_topic.h"
 #include "data/data_forum.h"
-#include "data/data_peer_values.h"
+#include "data/data_forum_topic.h"
 #include "data/data_peer.h"
+#include "data/data_peer_values.h"
 #include "data/data_photo.h"
 #include "data/data_saved_sublist.h"
 #include "data/data_session.h"
 #include "data/data_star_gift.h"
 #include "data/data_stories.h"
 #include "data/data_user.h"
-#include "data/stickers/data_custom_emoji.h"
+#include "editor/video/video_editor_layer.h"
 #include "editor/photo_editor_common.h"
 #include "editor/photo_editor_layer_widget.h"
-#include "editor/video/video_editor_layer.h"
 #include "history/history.h"
 #include "info/channel_statistics/boosts/giveaway/boost_badge.h"
 #include "info/channel_statistics/boosts/info_boosts_widget.h"
-#include "info/info_memento.h"
 #include "info/profile/info_profile_badge.h"
 #include "info/profile/info_profile_birthday_effect.h"
 #include "info/profile/info_profile_cover.h" // LargeCustomEmojiMargins
@@ -63,6 +63,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/userpic/info_userpic_emoji_builder_common.h"
 #include "info/userpic/info_userpic_emoji_builder_common.h"
 #include "info/userpic/info_userpic_emoji_builder_menu_item.h"
+#include "info/info_memento.h"
 #include "lang/lang_keys.h"
 #include "lottie/lottie_animation.h"
 #include "lottie/lottie_multi_player.h"
@@ -70,45 +71,44 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "media/stories/media_stories_post.h"
 #include "menu/menu_mute.h"
-#include "settings/settings_credits_graphics.h"
-#include "settings/sections/settings_information.h"
 #include "settings/sections/settings_premium.h"
+#include "settings/settings_credits_graphics.h"
 #include "storage/storage_media_prepare.h"
 #include "ui/boxes/show_or_premium_box.h"
-#include "ui/color_contrast.h"
 #include "ui/controls/stars_rating.h"
 #include "ui/controls/swipe_handler.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/effects/animated_string.h"
 #include "ui/effects/animations.h"
-#include "ui/effects/upload_progress_overlay.h"
+#include "ui/effects/numbers_animation.h"
 #include "ui/effects/outline_segments.h"
 #include "ui/effects/round_checkbox.h"
-#include "ui/empty_userpic.h"
+#include "ui/effects/upload_progress_overlay.h"
 #include "ui/layers/generic_box.h"
-#include "ui/painter.h"
 #include "ui/peer/video_userpic_player.h"
-#include "ui/rect.h"
-#include "ui/effects/numbers_animation.h"
 #include "ui/text/text_utilities.h"
+#include "ui/toast/toast.h"
 #include "ui/widgets/fields/input_field.h"
-#include "ui/top_background_gradient.h"
-#include "ui/ui_utility.h"
+#include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/glare_tooltip.h"
 #include "ui/widgets/horizontal_fit_container.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/marquee_label.h"
-#include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/shadow.h"
 #include "ui/widgets/tooltip.h"
 #include "ui/wrap/fade_wrap.h"
+#include "ui/color_contrast.h"
+#include "ui/empty_userpic.h"
+#include "ui/painter.h"
+#include "ui/rect.h"
+#include "ui/top_background_gradient.h"
+#include "ui/ui_utility.h"
 #include "window/themes/window_theme.h"
 #include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
-#include "ui/toast/toast.h"
-#include "boxes/sticker_set_box.h"
+
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_info.h"
@@ -418,7 +418,6 @@ TopBar::TopBar(
 	nullptr,
 	_gifPausedChecker))
 , _hasActions(!_savedMessages
-	&& descriptor.source != Source::Stories
 	&& descriptor.source != Source::Preview
 	&& (_wrap.current() != Wrap::Side || !_peer->isNotificationsUser()))
 , _minForProgress([&] {
@@ -564,8 +563,12 @@ TopBar::TopBar(
 	setupUniqueBadgeTooltip();
 	setupButtons(controller, descriptor.source);
 	setupSwipeBack(controller);
-	setupUserpicButton(controller);
-	if (_hasActions) {
+	auto chooseProfilePhoto = setupUserpicButton(controller);
+	if (_hasActions && _source == Source::Stories) {
+		setupMyProfileActions(
+			controller,
+			std::move(chooseProfilePhoto));
+	} else if (_hasActions) {
 		_peer->session().changes().peerFlagsValue(
 			_peer,
 			Data::PeerUpdate::Flag::FullInfo
@@ -1016,24 +1019,31 @@ void TopBar::openBoostsSectionForStory(
 	const auto peer = _peer;
 	if (_boostsStatus) {
 		_storyBoostsLoading = false;
-		controller->showSection(Info::Boosts::Make(peer, *_boostsStatus));
+		controller->showSection(
+			Info::Boosts::MakeForStory(peer, *_boostsStatus));
 		return;
 	}
 	_boostsApi->request(
-	) | rpl::on_error_done([=](const QString &) {
-		_storyBoostsLoading = false;
-		controller->showSection(Info::Boosts::Make(peer));
-	}, [=] {
-		auto status = _boostsApi->boostStatus();
-		const auto complete = !status.link.isEmpty();
-		if (complete) {
-			_boostsStatus = std::move(status);
-		}
-		_storyBoostsLoading = false;
-		controller->showSection(complete
-			? Info::Boosts::Make(peer, *_boostsStatus)
-			: Info::Boosts::Make(peer));
-	}, lifetime());
+	) | rpl::on_error_done(
+		[=](const QString &) {
+			_storyBoostsLoading = false;
+			controller->showSection(
+				Info::Boosts::MakeForStory(peer));
+		},
+		[=] {
+			auto status = _boostsApi->boostStatus();
+			const auto complete = !status.link.isEmpty();
+			if (complete) {
+				_boostsStatus = std::move(status);
+			}
+			_storyBoostsLoading = false;
+			controller->showSection(complete
+				? Info::Boosts::MakeForStory(
+					peer,
+					*_boostsStatus)
+				: Info::Boosts::MakeForStory(peer));
+		},
+		lifetime());
 }
 
 void TopBar::searchInCommunity(
@@ -1471,7 +1481,7 @@ void TopBar::setupActions(not_null<Window::SessionController*> controller) {
 	}
 }
 
-void TopBar::setupUserpicButton(
+Fn<void()> TopBar::setupUserpicButton(
 		not_null<Window::SessionController*> controller) {
 	_userpicButton = base::make_unique_q<Userpic>(
 		this,
@@ -1484,7 +1494,7 @@ void TopBar::setupUserpicButton(
 			_userpicUniqueKey = InMemoryKey();
 			update();
 		}, lifetime());
-		return;
+		return nullptr;
 	}
 
 	const auto openPhoto = [=, peer = _peer] {
@@ -1848,6 +1858,8 @@ void TopBar::setupUserpicButton(
 			}
 		}
 	}, _userpicButton->lifetime());
+
+	return [=] { chooseFile(ChosenType::Set); };
 }
 
 void TopBar::startUploadOverlay() {
@@ -2126,9 +2138,6 @@ int TopBar::calculateRightButtonsWidth() const {
 	auto width = 0;
 	if (_close) {
 		width += _close->width();
-	}
-	if (_topBarButton) {
-		width += _topBarButton->width();
 	}
 	if (_tabMenuToggle && _tabMenuToggle->toggled()) {
 		width += _tabMenuToggle->width();
@@ -2881,10 +2890,6 @@ void TopBar::updateRightButtonsPosition() {
 		_close->moveToRight(right, 0);
 		right += _close->width();
 	}
-	if (_topBarButton) {
-		_topBarButton->moveToRight(right, 0);
-		right += _topBarButton->width();
-	}
 	if (_tabMenuToggle && _tabMenuToggle->toggled()) {
 		_tabMenuToggle->moveToRight(right, 0);
 		right += _tabMenuToggle->width();
@@ -3250,38 +3255,10 @@ void TopBar::setupButtons(
 		updateTabSwapVisibility();
 		updateRightButtonsPosition();
 
-		if (wrap != Wrap::Side) {
-			if (source == Source::Stories) {
-				addTopBarEditButton(controller, wrap);
-			}
-		}
 		updateButtonsColorOverride();
 		raiseTabSearchOverlay();
 		raiseTabSelectionOverlay();
 	}, lifetime());
-}
-
-void TopBar::addTopBarEditButton(
-		not_null<Window::SessionController*> controller,
-		Wrap wrap) {
-	_topBarButton = base::make_unique_q<BackdropIconButton>(
-		this,
-		((wrap == Wrap::Layer)
-			? st::infoLayerTopBarBlackEdit
-			: st::infoTopBarBlackEdit));
-	_topBarButton->show();
-	_topBarButton->addClickHandler([=] {
-		controller->showSettings(::Settings::InformationId());
-	});
-	_topBarButton->setAccessibleName(tr::lng_settings_information(tr::now));
-
-	widthValue() | rpl::on_next([=] {
-		if (_close) {
-			_topBarButton->moveToRight(_close->width(), 0);
-		} else {
-			_topBarButton->moveToRight(0, 0);
-		}
-	}, _topBarButton->lifetime());
 }
 
 std::optional<QColor> TopBar::buttonsColorOverride() const {
@@ -3303,7 +3280,6 @@ void TopBar::updateButtonsColorOverride() {
 	apply(_tabMenuToggle ? _tabMenuToggle->entity() : nullptr);
 	apply(_tabSearchToggle ? _tabSearchToggle->entity() : nullptr);
 	apply(_tabGroupToggle ? _tabGroupToggle->entity() : nullptr);
-	apply(_topBarButton.get());
 }
 
 void TopBar::showTopBarMenu(

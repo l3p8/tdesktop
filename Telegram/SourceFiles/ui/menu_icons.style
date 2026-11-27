@@ -222,6 +222,8 @@ menuIconPendingRequests: icon {{ "menu/pending_requests-24x24", menuIconColor }}
 menuIconRemovedUsers: icon {{ "menu/removed_users-24x24", menuIconColor }};
 menuIconWelcomeMessage: icon {{ "menu/welcome_message-24x24", menuIconColor }};
 menuIconStar: icon {{ "menu/star", menuIconColor }};
+menuIconGrams: icon {{ "payments/ton_emoji-18x18", menuIconColor, point(3px, 2px) }};
+menuIconFragment: icon {{ "fragment", menuIconColor }};
 
 menuIconTTL: icon {{ "menu/auto_delete", menuIconColor }};
 
@@ -247,6 +249,8 @@ mediaMenuIconDownloadLocked: icon {{ "menu/download_locked", mediaviewMenuFg }};
 mediaMenuIconCopy: icon {{ "menu/copy", mediaviewMenuFg }};
 mediaMenuIconForward: icon {{ "menu/forward", mediaviewMenuFg }};
 mediaMenuIconShare: icon {{ "menu/share2", mediaviewMenuFg }};
+mediaMenuIconSavedMessages: icon {{ "menu/saved_messages", mediaviewMenuFg }};
+mediaMenuIconSoundAdd: icon {{ "menu/sound_add", mediaviewMenuFg }};
 mediaMenuIconDelete: icon {{ "menu/delete", mediaviewMenuFg }};
 mediaMenuIconShowAll: icon {{ "menu/all_media", mediaviewMenuFg }};
 mediaMenuIconProfile: icon {{ "menu/profile", mediaviewMenuFg }};

@@ -11,18 +11,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/flat_set.h"
 #include "base/qt_signal_producer.h"
 #include "lang/lang_keys.h"
-#include "ui/effects/round_checkbox.h"
 #include "ui/effects/outline_segments.h"
-#include "ui/arc_angles.h"
+#include "ui/effects/round_checkbox.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/tooltip.h"
+#include "ui/arc_angles.h"
 #include "ui/dynamic_image.h"
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
+
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_dialogs.h"
@@ -97,7 +98,8 @@ List::List(
 	const style::DialogsStoriesList &st,
 	rpl::producer<Content> content)
 : RpWidget(parent)
-, _st(st) {
+, _st(st)
+, _uploadCancel([=] { update(); }) {
 	setCursor(style::cur_default);
 
 	std::move(content) | rpl::on_next([=](Content &&content) {
@@ -117,6 +119,7 @@ void List::showContent(Content &&content) {
 	if (content.elements.empty()) {
 		_content = {};
 		_data = {};
+		_uploadCancel.setHovered(0);
 		_empty = true;
 		updateUploadAnimation();
 		validateTitle();
@@ -150,6 +153,7 @@ void List::showContent(Content &&content) {
 			item.element.uploading = element.uploading;
 			item.element.uploadFailed = element.uploadFailed;
 			item.element.uploadProgress = element.uploadProgress;
+			item.element.uploadId = element.uploadId;
 		} else {
 			_data.items.emplace_back(Item{ .element = element });
 		}
@@ -200,6 +204,9 @@ void List::updateScrollMax() {
 	const auto widthFull = full.left + int(_data.items.size()) * singleFull;
 	_scrollLeftMax = std::max(widthFull - width(), 0);
 	_scrollLeft = std::clamp(_scrollLeft, 0, _scrollLeftMax);
+	if (underMouse()) {
+		updateSelected();
+	}
 	checkLoadMore();
 	update();
 }
@@ -210,6 +217,10 @@ rpl::producer<uint64> List::clicks() const {
 
 rpl::producer<uint64> List::addStoryClicks() const {
 	return _addStoryClicks.events();
+}
+
+rpl::producer<uint64> List::cancelUploadRequests() const {
+	return _cancelUploadRequests.events();
 }
 
 rpl::producer<ShowMenuRequest> List::showMenuRequests() const {
@@ -859,7 +870,14 @@ void List::paint(
 		}
 
 		if (const auto full = single.itemFull) {
-			if (full->element.hasVideoStream && expandRatio > 0.) {
+			if (_state == State::Full) {
+				_uploadCancel.paint(
+					p,
+					full->element.uploadId,
+					userpic);
+			}
+			if (full->element.hasVideoStream
+				&& expandRatio > 0.) {
 				p.setOpacity(expandRatio);
 				const auto skip = std::ceil(line + lineRead);
 				Ui::PaintLiveBadge(
@@ -871,10 +889,16 @@ void List::paint(
 			} else if (full->element.mine
 				&& !full->element.uploading
 				&& expandRatio > 0.) {
-				const auto fade = badgeFadeProgress(full->element.id, now);
+				const auto fade
+					= badgeFadeProgress(
+						full->element.id,
+						now);
 				if (fade > 0.) {
 					p.setOpacity(expandRatio * fade);
-					paintAddBadge(p, full->element.id, userpic);
+					paintAddBadge(
+						p,
+						full->element.id,
+						userpic);
 				}
 			}
 		}
@@ -1229,6 +1253,7 @@ void List::mousePressEvent(QMouseEvent *e) {
 
 	_mouseDownPosition = _lastMousePosition;
 	_pressed = _selected;
+	_pressedUpload = _uploadCancel.hovered();
 }
 
 void List::mouseMoveEvent(QMouseEvent *e) {
@@ -1242,6 +1267,7 @@ void List::mouseMoveEvent(QMouseEvent *e) {
 		if ((_lastMousePosition - *_mouseDownPosition).manhattanLength()
 			>= QApplication::startDragDistance()) {
 			_dragging = true;
+			_uploadCancel.setHovered(0);
 			_startDraggingLeft = _scrollLeft;
 		}
 	}
@@ -1271,31 +1297,48 @@ void List::checkLoadMore() {
 }
 
 void List::mouseReleaseEvent(QMouseEvent *e) {
+	if (e->button() != Qt::LeftButton) {
+		return;
+	}
 	_lastMousePosition = e->globalPos();
 	const auto guard = gsl::finally([&] {
 		_mouseDownPosition = std::nullopt;
 	});
 
 	const auto pressed = std::exchange(_pressed, -1);
+	const auto pressedUpload = std::exchange(_pressedUpload, 0);
 	if (finishDragging()) {
 		return;
 	}
 	updateSelected();
+	if (pressedUpload) {
+		if (_uploadCancel.hovered() == pressedUpload) {
+			_cancelUploadRequests.fire_copy(pressedUpload);
+		}
+		return;
+	}
 	if (_selected == pressed) {
 		if (!_expanded) {
 			requestExpanded(true);
-		} else if (_selected < _data.items.size()) {
-			const auto id = _data.items[_selected].element.id;
+		} else if (_selected >= 0 && _selected < _data.items.size()) {
+			const auto &element = _data.items[_selected].element;
 			const auto point = QPointF(mapFromGlobal(e->globalPos()));
-			if (_addBadge
-				&& (_addBadge->first == id)
-				&& _addBadge->second.contains(point)) {
-				_addStoryClicks.fire_copy(id);
+			if (element.canAddFirstStory()
+				|| (_addBadge
+					&& (_addBadge->first == element.id)
+					&& _addBadge->second
+						.contains(point))) {
+				_addStoryClicks.fire_copy(element.id);
 			} else {
-				_clicks.fire_copy(id);
+				_clicks.fire_copy(element.id);
 			}
 		}
 	}
+}
+
+void List::leaveEventHook(QEvent *e) {
+	_uploadCancel.setHovered(0);
+	RpWidget::leaveEventHook(e);
 }
 
 void List::setExpandedHeight(int height, bool momentum) {
@@ -1602,6 +1645,11 @@ void List::setState(State state) {
 	}
 	_state = state;
 	updateGeometry();
+	if (_state != State::Full) {
+		_uploadCancel.setHovered(0);
+	} else if (underMouse()) {
+		updateSelected();
+	}
 }
 
 void List::contextMenuEvent(QContextMenuEvent *e) {
@@ -1745,6 +1793,30 @@ void List::updateSelected() {
 		}
 		_selected = selected;
 	}
+	updateUploadCancel(layout, p);
+}
+
+void List::updateUploadCancel(const Layout &layout, QPoint point) {
+	if (_state != State::Full
+		|| _dragging
+		|| !underMouse()
+		|| _selected < layout.startIndexFull
+		|| _selected >= layout.endIndexFull
+		|| !rect().contains(point)) {
+		_uploadCancel.setHovered(0);
+		return;
+	}
+	const auto &full = _st.full;
+	const auto radius = full.photo / 2.;
+	const auto left = layout.thumbnailLeft
+		+ layout.single * (_selected - layout.startIndexFull);
+	const auto center = QPointF(left + radius, full.photoTop + radius);
+	const auto delta = QPointF(point) - center;
+	const auto distance = QPointF::dotProduct(delta, delta);
+	_uploadCancel.setHovered(
+		(distance <= radius * radius)
+			? _data.items[_selected].element.uploadId
+			: 0);
 }
 
 } // namespace Dialogs::Stories

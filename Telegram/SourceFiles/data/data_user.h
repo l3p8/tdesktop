@@ -7,16 +7,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "base/flags.h"
+#include "base/weak_ptr.h"
 #include "core/credits_amount.h"
 #include "data/components/credits.h"
 #include "data/data_birthday.h"
-#include "data/data_peer.h"
 #include "data/data_chat_participant_status.h"
 #include "data/data_lastseen_status.h"
+#include "data/data_peer.h"
 #include "data/data_user_names.h"
 #include "dialogs/dialogs_key.h"
-#include "base/flags.h"
-#include "base/weak_ptr.h"
 
 namespace Data {
 class Forum;
@@ -110,6 +110,7 @@ struct BotInfo {
 	bool canManageEmojiStatus : 1 = false;
 	bool supportsBusiness : 1 = false;
 	bool hasMainApp : 1 = false;
+	bool hasPreviewMedias : 1 = false;
 	bool userCreatesTopics : 1 = false;
 	bool setBotPhotoHidden : 1 = false;
 	bool canManageBots : 1 = false;

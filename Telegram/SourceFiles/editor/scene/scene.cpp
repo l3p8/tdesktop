@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "editor/scene/scene.h"
 
-#include "editor/photo_editor_common.h"
 #include "editor/scene/scene_item_animated.h"
 #include "editor/scene/scene_item_canvas.h"
 #include "editor/scene/scene_item_line.h"
@@ -15,10 +14,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/scene/scene_item_text.h"
 #include "editor/scene/scene_text_editing.h"
 #include "editor/video/video_clip.h"
+#include "editor/photo_editor_common.h"
 #include "ui/image/image_prepare.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
 #include "ui/rp_widget.h"
+
 #include "styles/style_editor.h"
 
 #include <QGraphicsSceneMouseEvent>
@@ -1388,6 +1389,14 @@ void Scene::restore(SaveState state) {
 
 void Scene::createTextAtCenter(int rotation, bool flipped) {
 	_textEdit->createAtCenter(rotation, flipped);
+}
+
+void Scene::setTextEmojiPanel(QWidget *panel) {
+	_textEdit->setEmojiPanel(panel);
+}
+
+void Scene::insertText(const QString &text) {
+	_textEdit->insertText(text);
 }
 
 void Scene::startTextEditing(ItemText *item) {

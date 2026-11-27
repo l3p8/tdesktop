@@ -7,20 +7,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "storage/storage_media_prepare.h"
 
+#include "core/crash_reports.h"
+#include "core/mime_type.h"
 #include "data/data_document.h"
-#include "editor/photo_editor_common.h"
 #include "editor/scene/scene.h"
 #include "editor/scene/scene_item_sticker.h"
+#include "editor/photo_editor_common.h"
 #include "ffmpeg/ffmpeg_bytes_io_wrap.h"
 #include "ffmpeg/ffmpeg_utility.h"
+#include "lang/lang_keys.h"
 #include "media/audio/media_audio.h"
 #include "platform/platform_file_utilities.h"
-#include "lang/lang_keys.h"
 #include "storage/localimageloader.h"
-#include "core/mime_type.h"
-#include "ui/image/image_prepare.h"
 #include "ui/chat/attach/attach_prepare.h"
-#include "core/crash_reports.h"
+#include "ui/image/image_prepare.h"
 
 #include <QtCore/QSemaphore>
 #include <QtCore/QMimeData>
@@ -188,8 +188,10 @@ bool ValidatePhotoEditorMediaDragData(
 
 PhotoEditorMedia ReadPhotoEditorMedia(
 		const QString &path,
-		const QByteArray &content) {
-	if (path.isEmpty() && content.size() > Images::kReadBytesLimit) {
+		const QByteArray &content,
+		std::optional<int64> maxSize) {
+	const auto limit = maxSize.value_or(Images::kReadBytesLimit);
+	if (path.isEmpty() && content.size() > limit) {
 		return {};
 	}
 	const auto mime = path.isEmpty()
@@ -208,7 +210,7 @@ PhotoEditorMedia ReadPhotoEditorMedia(
 	using Video = PreparedFileInformation::Video;
 	if (const auto video = std::get_if<Video>(&information->media)) {
 		if (!path.isEmpty()
-			&& QFileInfo(path).size() > Images::kReadBytesLimit) {
+			&& QFileInfo(path).size() > limit) {
 			return {};
 		}
 		return {

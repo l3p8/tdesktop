@@ -33,9 +33,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/gradient_round_button.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/vertical_layout.h"
-#include "ui/top_background_gradient.h"
 #include "ui/painter.h"
+#include "ui/top_background_gradient.h"
 #include "ui/ui_utility.h"
+
 #include "styles/style_credits.h"
 #include "styles/style_layers.h"
 
@@ -1892,7 +1893,7 @@ void StartCraftAnimation(
 					const auto wasTotal = box->parentWidget()->height();
 					const auto wasButtons = wasTotal - wasContent;
 
-					container->clear();
+					container->detachRows();
 					container->add(std::move(success->owned));
 
 					box->setStyle(st::giftBox);

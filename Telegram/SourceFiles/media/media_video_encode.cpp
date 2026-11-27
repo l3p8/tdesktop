@@ -569,7 +569,10 @@ bool MusicMixer::init(
 		return false;
 	}
 	const auto stream = _input->streams[_streamIndex];
-	_decoder = MakeCodecPointer({ .stream = stream });
+	_decoder = MakeCodecPointer({
+		.parameters = stream->codecpar,
+		.timeBase = stream->time_base,
+	});
 	if (!_decoder) {
 		return false;
 	}
@@ -955,7 +958,10 @@ void AudioTranscoder::addMusic(const MusicTrack &track) {
 bool AudioTranscoder::init(
 		not_null<AVFormatContext*> output,
 		not_null<AVStream*> inStream) {
-	_decoder = MakeCodecPointer({ .stream = inStream });
+	_decoder = MakeCodecPointer({
+		.parameters = inStream->codecpar,
+		.timeBase = inStream->time_base,
+	});
 	if (!_decoder) {
 		return false;
 	}
@@ -2118,7 +2124,11 @@ struct TranscodeAttempt {
 	const auto sourceSize = !source.bytes.isEmpty()
 		? int64(source.bytes.size())
 		: QFileInfo(source.path).size();
-	if (sourceSize <= 0 || sourceSize >= kMaxSourceSize) {
+	const auto oversized = (sourceSize >= kMaxSourceSize);
+	const auto canTrimLargeFile = source.bytes.isEmpty()
+		&& (source.mode == VideoSource::Mode::Mp4)
+		&& (source.from > 0 || source.till > 0);
+	if (sourceSize <= 0 || (oversized && !canTrimLargeFile)) {
 		return {};
 	}
 
@@ -2218,6 +2228,9 @@ struct TranscodeAttempt {
 	const auto till = (source.till > from) ? source.till : crl::time(0);
 	const auto trimmed = (from > 0)
 		|| (till > 0 && (!shownDuration || till < shownDuration));
+	if (oversized && !trimmed) {
+		return {};
+	}
 	const auto span = till
 		? (till - from)
 		: ((totalDuration > from) ? (totalDuration - from) : crl::time(0));
@@ -2236,7 +2249,8 @@ struct TranscodeAttempt {
 	auto decoder = CodecPointer();
 	if (!copyVideo) {
 		decoder = MakeCodecPointer({
-			.stream = inVideoStream,
+			.parameters = inVideoStream->codecpar,
+			.timeBase = inVideoStream->time_base,
 			.videoMaxArea = kMaxTranscodeArea,
 		});
 		if (!decoder) {

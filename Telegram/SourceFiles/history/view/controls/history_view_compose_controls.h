@@ -10,18 +10,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_common.h"
 #include "base/object_ptr.h"
 #include "base/required.h"
-#include "base/unique_qptr.h"
 #include "base/timer.h"
+#include "base/unique_qptr.h"
 #include "chat_helpers/compose/compose_features.h"
 #include "chat_helpers/field_characters_count_manager.h"
 #include "chat_helpers/rich_paste_toast.h"
 #include "dialogs/dialogs_key.h"
 #include "history/view/controls/compose_controls_common.h"
 #include "history/view/controls/history_view_bot_menu_button.h"
-#include "ui/round_rect.h"
-#include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
 #include "ui/widgets/fields/input_field.h"
+#include "ui/round_rect.h"
+#include "ui/rp_widget.h"
 
 class History;
 class DocumentData;
@@ -614,7 +614,6 @@ private:
 
 	std::unique_ptr<InlineBots::Layout::Widget> _inlineResults;
 	std::unique_ptr<ChatHelpers::TabbedPanel> _tabbedPanel;
-	std::unique_ptr<Ui::DropdownMenu> _attachBotsMenu;
 	std::unique_ptr<ChatHelpers::FieldAutocomplete> _autocomplete;
 	std::unique_ptr<Ui::Emoji::SuggestionsController> _emojiSuggestions;
 
@@ -624,6 +623,7 @@ private:
 	std::unique_ptr<Controls::AiTooltipManager> _aiTooltipManager;
 	std::unique_ptr<Controls::AiTooltipManager> _sendAsFileTooltipManager;
 	std::unique_ptr<Controls::StashHintManager> _stashHintManager;
+	std::unique_ptr<Ui::DropdownMenu> _attachBotsMenu;
 	std::shared_ptr<Ui::ChatStyle> _chatStyle;
 
 	const Fn<SendMenu::Details()> _sendMenuDetails;

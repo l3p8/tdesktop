@@ -44,8 +44,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/popup_menu.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
-#include "ui/vertical_list.h"
 #include "ui/ui_utility.h"
+#include "ui/vertical_list.h"
+
 #include "styles/style_credits.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_info.h"
@@ -322,9 +323,6 @@ void InnerWidget::createProfileTop() {
 	blocks.addSeparator();
 	// Layout insertion shows even wrappers whose initial toggle is off.
 	blocks.add(makeGiftsButton())->finishAnimating();
-	if (auto post = makePostButton()) {
-		blocks.add(std::move(post))->finishAnimating();
-	}
 	blocks.add(makeArchiveButton())->finishAnimating();
 	blocks.add(makeRecentButton())->finishAnimating();
 	Ui::AddSkip(_top, skip);
@@ -721,7 +719,7 @@ void InnerWidget::refreshEmpty() {
 		&& albumId
 		&& (albumId != Data::kStoriesAlbumIdArchive)
 		&& _peer->canEditStories();
-	_albumEmpty = albumCanAdd;
+	_albumEmpty = albumCanAdd || (albumId == Data::kStoriesAlbumIdSaved);
 	if (albumCanAdd) {
 		auto empty = object_ptr<Ui::VerticalLayout>(this);
 		empty->add(
